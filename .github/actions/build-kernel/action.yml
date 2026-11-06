@@ -975,8 +975,8 @@ runs:
           's/.*KERNEL_SU_UAPI_VERSION[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' \
           "$UAPI_HEADER" | head -n 1)"
 
-        if [[ "$UAPI_VERSION" != "5" ]]; then
-          echo "::error::Expected UAPI 5, detected $UAPI_VERSION"
+        if [[ "$UAPI_VERSION" != "2" ]]; then
+          echo "::error::Expected UAPI 2 for the pinned compatible commit, detected $UAPI_VERSION"
           exit 1
         fi
 
