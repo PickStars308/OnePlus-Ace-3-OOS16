@@ -90,8 +90,8 @@ runs:
     - name: Get Action info
       shell: bash
       env:
-        ACTION_REPO_VAL: ${{ github.action_repository }}
-        ACTION_REF_VAL: ${{ github.action_ref }}
+        ACTION_REPO_VAL: WildKernels/OnePlus_KernelSU_SUSFS
+        ACTION_REF_VAL: d44240312aeb978463b66c3a3155c6d99a7c7a3c
       run: |
         set -euo pipefail
         echo "ACTION_REPO=$ACTION_REPO_VAL" >> $GITHUB_ENV
