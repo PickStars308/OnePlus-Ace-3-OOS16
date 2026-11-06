@@ -2439,7 +2439,7 @@ runs:
         set -euo pipefail
         
         # Get commit SHAs with fallback
-        KSU_SHA="${KSU_COMMIT_SHA:-unknown}"
+        KSU_SHA="${KSUN_COMMIT_SHA:-${KSU_COMMIT_SHA:-unknown}}"
         SUSFS_SHA="${SUSFS_COMMIT_SHA:-unknown}"
         
         {
@@ -2515,7 +2515,11 @@ runs:
               echo "| **KSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/tiann/KernelSU/commit/$KSU_SHA) |"
             fi
           else
-            echo "| **KSU Commit** | unknown |"
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              echo "| **KSUN Commit** | unknown |"
+            else
+              echo "| **KSU Commit** | unknown |"
+            fi
           fi
           
           if [ "${{ env.OP_SUSFS }}" = true ]; then
