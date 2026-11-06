@@ -311,6 +311,17 @@ jobs:
 
     steps:
       # ==================================================
+      # 0. 拉取当前仓库
+      #
+      # 必须先检出自己的仓库，才能加载：
+      # .github/actions/build-kernel/action.yml
+      # ==================================================
+      - name: Checkout current repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      # ==================================================
       # 1. 拉取上游配置文件和 Manifest
       # ==================================================
       - name: Checkout upstream configuration
