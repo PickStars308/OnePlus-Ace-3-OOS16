@@ -1,13 +1,8 @@
 
-name: OnePlus Ace 3 Kernel Build
+name: Build OnePlus Ace 3 - KernelSU Next + SUSFS
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/build-kernel.yml"
 
 permissions:
   contents: write
@@ -17,9 +12,293 @@ concurrency:
   group: ace3-kernel-build
   cancel-in-progress: false
 
+env:
+  UPSTREAM_REPO: WildKernels/OnePlus_KernelSU_SUSFS
+  UPSTREAM_REF: d44240312aeb978463b66c3a3155c6d99a7c7a3c
+  CONFIG_FILE: configs/a16/OP-ACE-3-5.15.167.json
+  MANIFEST_FILE: manifests/a16/oneplus_ace3_5.15.167_w.xml
+  CACHE_TAG: toolchain-cache
+
 jobs:
+
+  # ==========================================================
+  # JOB 1: 获取配置、Manifest，准备构建工具链缓存
+  # ==========================================================
+
+  prepare:
+    name: Prepare Source Configuration and Toolchains
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+
+    outputs:
+      config_json: ${{ steps.config.outputs.json }}
+      toolchains: ${{ steps.manifest.outputs.toolchains }}
+
+    steps:
+
+      - name: Checkout pinned upstream repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.UPSTREAM_REF }}
+          path: upstream
+          fetch-depth: 1
+
+      # ------------------------------------------------------
+      # 1. 验证设备配置
+      # ------------------------------------------------------
+
+      - name: Validate Ace 3 configuration
+        id: config
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CONFIG="upstream/${CONFIG_FILE}"
+
+          test -f "$CONFIG"
+
+          echo "===== ACE 3 CONFIG ====="
+          jq '.' "$CONFIG"
+
+          jq -e '
+            .model == "OP-ACE-3-5.15.167" and
+            .soc == "kalama" and
+            .branch == "wild/sm8550" and
+            .manifest == "oneplus_ace3_5.15.167_w.xml" and
+            .android_version == "android13" and
+            .kernel_version == "5.15" and
+            .os_version == "A16" and
+            .lto == "thin" and
+            .c_compiler == "kernel_platform/prebuilts/clang/host/linux-x86/clang-r450784e/bin" and
+            .rust_build == false and
+            .susfs == true and
+            .opt == true
+          ' "$CONFIG"
+
+          CONFIG_JSON="$(jq -c '.' "$CONFIG")"
+
+          echo "json=$CONFIG_JSON" >> "$GITHUB_OUTPUT"
+
+          echo "Ace 3 configuration validated."
+
+      # ------------------------------------------------------
+      # 2. 解析 Manifest，确定所需的工具链
+      # ------------------------------------------------------
+
+      - name: Parse device manifest
+        id: manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          import xml.etree.ElementTree as ET
+          import json
+          import os
+
+          path = "upstream/" + os.environ["MANIFEST_FILE"]
+
+          root = ET.parse(path).getroot()
+
+          remotes = {
+              r.get("name"): r.get("fetch").rstrip("/")
+              for r in root.findall("remote")
+          }
+
+          default = root.find("default")
+          default_remote = default.get("remote")
+          default_revision = default.get("revision")
+
+          TOOLCHAIN_MAP = {
+              "clang/host/linux-x86": "clang",
+              "prebuilts/rust": "rust",
+              "prebuilts/clang-tools": "clang-tools",
+              "kernel/prebuilts/build-tools": "build-tools",
+              "AnyKernel3": "AnyKernel3"
+          }
+
+          result = {}
+
+          for project in root.findall("project"):
+              name = project.get("name")
+
+              label = None
+
+              for key, value in TOOLCHAIN_MAP.items():
+                  if key in name:
+                      label = value
+                      break
+
+              if not label:
+                  continue
+
+              remote = project.get("remote", default_remote)
+              revision = project.get("revision", default_revision)
+              base = remotes.get(remote)
+
+              if not base or not revision:
+                  raise RuntimeError(
+                      f"Missing remote/revision: {name}"
+                  )
+
+              if "googlesource.com" in base:
+                  url = f"{base}/{name}/+archive/{revision}.tar.gz"
+
+              elif "github.com" in base:
+                  url = f"{base}/{name}/archive/{revision}.tar.gz"
+
+              elif "git.codelinaro.org" in base or "gitlab.com" in base:
+                  basename = name.split("/")[-1]
+                  url = (
+                      f"{base}/{name}/-/archive/"
+                      f"{revision}/{basename}-{revision}.tar.gz"
+                  )
+
+              else:
+                  raise RuntimeError(
+                      f"Unsupported source: {base}"
+                  )
+
+              filename = f"{label}-{revision}.tar.gz"
+
+              result[filename] = {
+                  "name": name,
+                  "label": label,
+                  "revision": revision,
+                  "filename": filename,
+                  "url": url
+              }
+
+          entries = list(result.values())
+
+          if not entries:
+              raise RuntimeError("No toolchains found in manifest")
+
+          print("===== REQUIRED TOOLCHAINS =====")
+
+          for item in entries:
+              print(item["filename"])
+              print(item["url"])
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(
+                  "toolchains=" +
+                  json.dumps(entries, separators=(",", ":")) +
+                  "\n"
+              )
+          PY
+
+      # ------------------------------------------------------
+      # 3. 创建自己的工具链缓存 Release
+      # ------------------------------------------------------
+
+      - name: Prepare toolchain cache release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release view "$CACHE_TAG" \
+            --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+          gh release create "$CACHE_TAG" \
+            --title "Kernel Toolchain Cache" \
+            --notes "Ace 3 kernel build toolchain cache" \
+            --repo "$GITHUB_REPOSITORY"
+
+      # ------------------------------------------------------
+      # 4. 下载并缓存 Clang / Build-tools / AnyKernel3
+      # ------------------------------------------------------
+
+      - name: Mirror required toolchains
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOOLCHAINS_JSON: ${{ steps.manifest.outputs.toolchains }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y aria2
+
+          CACHE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${CACHE_TAG}"
+
+          while IFS= read -r item; do
+
+            FILENAME="$(jq -r '.filename' <<< "$item")"
+            URL="$(jq -r '.url' <<< "$item")"
+
+            echo ""
+            echo "========================================"
+            echo "Checking: $FILENAME"
+            echo "========================================"
+
+            STATUS="$(curl -sIL -o /dev/null \
+              -w '%{http_code}' "$CACHE_URL/$FILENAME" || true)"
+
+            PART_STATUS="$(curl -sIL -o /dev/null \
+              -w '%{http_code}' "$CACHE_URL/${FILENAME}.partaa" || true)"
+
+            if [[ "$STATUS" == "200" || "$PART_STATUS" == "200" ]]; then
+              echo "Already cached: $FILENAME"
+              continue
+            fi
+
+            echo "Downloading: $URL"
+
+            aria2c \
+              -x16 -s16 -k1M -j5 \
+              --file-allocation=none \
+              --console-log-level=error \
+              --summary-interval=0 \
+              --retry-wait=5 \
+              --max-tries=10 \
+              -o "$FILENAME" \
+              "$URL"
+
+            SIZE="$(stat -c%s "$FILENAME")"
+
+            if (( SIZE > 2000000000 )); then
+
+              echo "Splitting large archive..."
+
+              split -b 1500M -a 2 \
+                "$FILENAME" "${FILENAME}.part"
+
+              for PART in "${FILENAME}".part*; do
+
+                echo "Uploading $PART"
+
+                gh release upload "$CACHE_TAG" "$PART" \
+                  --clobber \
+                  --repo "$GITHUB_REPOSITORY"
+
+              done
+
+            else
+
+              echo "Uploading $FILENAME"
+
+              gh release upload "$CACHE_TAG" "$FILENAME" \
+                --clobber \
+                --repo "$GITHUB_REPOSITORY"
+
+            fi
+
+            rm -f "$FILENAME"
+            rm -f "${FILENAME}".part*
+
+          done < <(jq -c '.[]' <<< "$TOOLCHAINS_JSON")
+
+          echo "All required toolchains are cached."
+
+  # ==========================================================
+  # JOB 2: 完整编译内核
+  # ==========================================================
+  
   build:
-    name: Build Ace 3 A16 Kernel
+    name: Build OnePlus Ace 3 A16 Kernel
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
@@ -30,9 +309,9 @@ jobs:
       MANIFEST_PATH: manifests/a16/oneplus_ace3_5.15.167_w.xml
 
     steps:
-      # --------------------------------------------------
-      # 1. 获取上游配置、Manifest 和构建脚本
-      # --------------------------------------------------
+      # ==================================================
+      # 1. 拉取上游配置文件和 Manifest
+      # ==================================================
       - name: Checkout upstream configuration
         uses: actions/checkout@v4
         with:
@@ -44,9 +323,9 @@ jobs:
             manifests/a16/oneplus_ace3_5.15.167_w.xml
           sparse-checkout-cone-mode: false
 
-      # --------------------------------------------------
-      # 2. 读取并验证设备配置
-      # --------------------------------------------------
+      # ==================================================
+      # 2. 验证设备配置
+      # ==================================================
       - name: Validate device configuration
         id: config
         shell: bash
@@ -56,8 +335,15 @@ jobs:
           CONFIG="$GITHUB_WORKSPACE/upstream-meta/$CONFIG_PATH"
           MANIFEST="$GITHUB_WORKSPACE/upstream-meta/$MANIFEST_PATH"
 
-          test -s "$CONFIG"
-          test -s "$MANIFEST"
+          if [ ! -s "$CONFIG" ]; then
+            echo "::error::Device config not found: $CONFIG"
+            exit 1
+          fi
+
+          if [ ! -s "$MANIFEST" ]; then
+            echo "::error::Manifest not found: $MANIFEST"
+            exit 1
+          fi
 
           echo "===== Device configuration ====="
           jq '.' "$CONFIG"
@@ -72,6 +358,7 @@ jobs:
             .os_version == "A16" and
             .lto == "thin" and
             .susfs == true and
+            .opt == true and
             .rust_build == false
           ' "$CONFIG" >/dev/null
 
@@ -80,18 +367,16 @@ jobs:
 
           echo "Configuration validation passed."
 
-      # --------------------------------------------------
+      # ==================================================
       # 3. 修复 Manifest 路径
       #
-      # 上游 Action 在：
-      # $GITHUB_WORKSPACE/OP-ACE-3-5.15.167
-      #
-      # 执行：
+      # 上游 Action 会在内核源码目录执行：
       # cp ../manifests/a16/xxx.xml manifest.xml
       #
-      # 所以必须把 Manifest 放到 workspace/manifests/a16
-      # --------------------------------------------------
-      - name: Prepare manifest
+      # 所以 Manifest 必须放在：
+      # $GITHUB_WORKSPACE/manifests/a16/
+      # ==================================================
+      - name: Prepare kernel manifest
         shell: bash
         run: |
           set -euo pipefail
@@ -103,13 +388,84 @@ jobs:
             "$GITHUB_WORKSPACE/manifests/a16/oneplus_ace3_5.15.167_w.xml"
 
           echo "===== Manifest verification ====="
+
           ls -lh "$GITHUB_WORKSPACE/manifests/a16/"
 
-          test -s "$GITHUB_WORKSPACE/manifests/a16/oneplus_ace3_5.15.167_w.xml"
+          test -s \
+            "$GITHUB_WORKSPACE/manifests/a16/oneplus_ace3_5.15.167_w.xml"
 
-      # --------------------------------------------------
-      # 4. 创建上游要求的 toolchain-cache Release
-      # --------------------------------------------------
+          echo "Manifest prepared successfully."
+
+      # ==================================================
+      # 4. 安装系统构建依赖
+      #
+      # 关键修复：
+      # 上游 Action 使用 ccache，但不会自动安装 ccache。
+      # ==================================================
+      - name: Install build dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+
+          sudo apt-get install -y \
+            ccache \
+            bc \
+            bison \
+            build-essential \
+            curl \
+            flex \
+            git \
+            libelf-dev \
+            libssl-dev \
+            lz4 \
+            make \
+            python3 \
+            python3-pip \
+            python3-requests \
+            rsync \
+            unzip \
+            zip \
+            zstd \
+            pigz \
+            aria2
+
+          echo "===== ccache ====="
+          command -v ccache
+          ccache --version
+
+          echo "===== build tools ====="
+          git --version
+          python3 --version
+          make --version
+          aria2c --version | head -n 1
+
+      # ==================================================
+      # 5. 配置 ccache
+      # ==================================================
+      - name: Configure ccache
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$HOME/.cache/ccache"
+
+          ccache --set-config=max_size=10G
+          ccache --set-config=compression=true
+
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+
+          echo "===== ccache configuration ====="
+          ccache -p
+          ccache -s
+
+      # ==================================================
+      # 6. 创建 toolchain-cache Release
+      #
+      # 上游源码同步脚本会从当前仓库的
+      # toolchain-cache Release 下载工具链归档。
+      # ==================================================
       - name: Prepare toolchain cache release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -126,23 +482,26 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
               --title "Toolchains Mirror Cache" \
-              --notes "Kernel build toolchain cache."
+              --notes "Toolchain archives for kernel builds."
           else
             echo "toolchain-cache release already exists."
           fi
 
-      # --------------------------------------------------
-      # 5. 镜像 Manifest 所需的三个归档
+      # ==================================================
+      # 7. 下载并镜像 Manifest 中的工具链
       #
-      # 上游同步脚本会从当前仓库的 toolchain-cache
-      # Release 下载这些文件。
+      # 根据 Manifest 的真实 revision：
       #
-      # 必须包含：
-      # - build-tools
-      # - clang
-      # - AnyKernel3
-      # --------------------------------------------------
-      - name: Mirror required toolchains
+      # build-tools:
+      # a27755ba41db8a1487c7d2ac7d0da22ec5e593c7
+      #
+      # clang:
+      # c420e3ab93e51a2f2ab4f8e8b517463c34a7e8bd
+      #
+      # AnyKernel3:
+      # 0b46673ae91aee8d60bd6ee257b4d56d3f6a0114
+      # ==================================================
+      - name: Mirror toolchain archives
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -158,7 +517,7 @@ jobs:
 
             echo ""
             echo "========================================"
-            echo "Checking: $filename"
+            echo "Checking $filename"
             echo "========================================"
 
             local assets
@@ -172,12 +531,14 @@ jobs:
               return 0
             fi
 
+            # 检查分片文件是否已经存在
             if grep -Fxq "${filename}.partaa" <<< "$assets"; then
-              echo "Split archive already cached: $filename"
+              echo "Split archive already exists: $filename"
               return 0
             fi
 
-            echo "Downloading: $url"
+            echo "Downloading:"
+            echo "$url"
 
             curl \
               --fail \
@@ -195,9 +556,8 @@ jobs:
 
             echo "Downloaded size: $size bytes"
 
-            # GitHub Release 单文件限制附近做分片处理
             if [ "$size" -gt 1900000000 ]; then
-              echo "Archive is large. Splitting..."
+              echo "Archive exceeds single asset limit. Splitting..."
 
               split -b 1500M -a 2 \
                 "$filename" \
@@ -223,41 +583,42 @@ jobs:
             echo "Mirror completed: $filename"
           }
 
-          # Build Tools
+          # 1. Build Tools
           mirror_asset \
             "build-tools-a27755ba41db8a1487c7d2ac7d0da22ec5e593c7.tar.gz" \
             "https://git.codelinaro.org/clo/la/kernel/prebuilts/build-tools/-/archive/a27755ba41db8a1487c7d2ac7d0da22ec5e593c7/kernel-prebuilts-build-tools-a27755ba41db8a1487c7d2ac7d0da22ec5e593c7.tar.gz"
 
-          # Clang
+          # 2. Clang
           mirror_asset \
             "clang-c420e3ab93e51a2f2ab4f8e8b517463c34a7e8bd.tar.gz" \
             "https://git.codelinaro.org/clo/la/kernelplatform/prebuilts-master/clang/host/linux-x86/-/archive/c420e3ab93e51a2f2ab4f8e8b517463c34a7e8bd/kernelplatform-prebuilts-master-clang-host-linux-x86-c420e3ab93e51a2f2ab4f8e8b517463c34a7e8bd.tar.gz"
 
-          # AnyKernel3
+          # 3. AnyKernel3
           mirror_asset \
             "AnyKernel3-0b46673ae91aee8d60bd6ee257b4d56d3f6a0114.tar.gz" \
             "https://github.com/WildKernels/AnyKernel3/archive/0b46673ae91aee8d60bd6ee257b4d56d3f6a0114.tar.gz"
 
           echo ""
-          echo "===== Cached release assets ====="
+          echo "===== Toolchain cache assets ====="
 
           gh release view "$RELEASE" \
             --repo "$REPO" \
             --json assets \
             --jq '.assets[].name'
 
-      # --------------------------------------------------
-      # 6. 编译内核
+      # ==================================================
+      # 8. 编译内核
       #
-      # 上游 Action 自动完成：
-      # - 同步 Kernel Source
-      # - 获取 Clang / Build Tools
-      # - 集成 KernelSU Next
-      # - 集成 SUSFS
-      # - 编译内核
-      # - 制作 AnyKernel3 ZIP
-      # - 上传 AK3 Artifact
-      # --------------------------------------------------
+      # 上游 Action 自动处理：
+      # - Kernel Source 同步
+      # - Clang 工具链
+      # - Kernel Build Tools
+      # - KernelSU Next
+      # - SUSFS
+      # - 内核编译
+      # - AnyKernel3 打包
+      # - AK3 Artifact 上传
+      # ==================================================
       - name: Build OnePlus Ace 3 Kernel
         id: kernel-build
         uses: WildKernels/OnePlus_KernelSU_SUSFS/.github/actions/build-kernel@d44240312aeb978463b66c3a3155c6d99a7c7a3c
@@ -268,23 +629,23 @@ jobs:
           ksu_type: KSUN
           ksu_branch_or_hash: ""
 
-          # 自动根据 Android / Kernel 版本选择 SUSFS 分支
+          # 自动选择 Android 13 / Kernel 5.15 对应 SUSFS 分支
           susfs_commit_hash_or_branch: ""
 
           # 编译优化
           optimize_level: O2
 
-          # 使用 ccache
+          # 启用 ccache
           clean: false
 
-          # 不上传额外调试文件
+          # 关闭额外调试产物
           debug: false
 
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
-      # --------------------------------------------------
-      # 7. 输出构建结果
-      # --------------------------------------------------
+      # ==================================================
+      # 9. 输出构建信息
+      # ==================================================
       - name: Build result
         if: success()
         shell: bash
@@ -297,21 +658,28 @@ jobs:
           ZIP_SHA256: ${{ steps.kernel-build.outputs.zip_sha256 }}
           IMAGE_SHA256: ${{ steps.kernel-build.outputs.image_sha256 }}
           BUILD_TIME: ${{ steps.kernel-build.outputs.build_time }}
+          CCACHE_HIT_RATE: ${{ steps.kernel-build.outputs.ccache_hit_rate }}
         run: |
+          set -euo pipefail
+
           {
-            echo "## OnePlus Ace 3 Kernel Build"
+            echo "# OnePlus Ace 3 Kernel Build"
             echo ""
             echo "| Item | Result |"
             echo "|---|---|"
             echo "| Device | OnePlus Ace 3 (kalama) |"
-            echo "| ROM target | A16 |"
+            echo "| Model | OP-ACE-3-5.15.167 |"
+            echo "| OS target | A16 |"
+            echo "| Android kernel base | Android 13 |"
             echo "| Kernel | $KERNEL_VERSION |"
             echo "| KernelSU | $KSU_TYPE $KSU_VERSION |"
             echo "| SUSFS | $SUSFS_VERSION |"
-            echo "| AK3 ZIP | $ZIP_NAME |"
+            echo "| Optimization | O2 / Thin LTO |"
+            echo "| ccache hit rate | $CCACHE_HIT_RATE |"
             echo "| Build time | ${BUILD_TIME}s |"
+            echo "| AK3 ZIP | $ZIP_NAME |"
             echo ""
-            echo "### SHA256"
+            echo "## SHA256"
             echo ""
             echo "- Image: \`$IMAGE_SHA256\`"
             echo "- AK3: \`$ZIP_SHA256\`"
