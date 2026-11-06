@@ -900,6 +900,20 @@ runs:
         }
         
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
+
+        echo "========== KERNEL PATCHES VERSION =========="
+        git -C kernel_patches log -1 --oneline || true
+        
+        echo "========== NEXT DIRECTORY =========="
+        ls -la kernel_patches/next/ || true
+        
+        echo "========== SUSFS PATCH DIRECTORIES =========="
+        find kernel_patches/next/susfs_fix_patches \
+          -maxdepth 3 -type f -print 2>/dev/null | sort || true
+        
+        echo "========== SEARCH TARGET PATCH =========="
+        find kernel_patches -type f \
+          -name 'fix_ksud_integration.c.patch' -print 2>/dev/null || true
         
         if [ "${{ env.OP_SUSFS }}" = true ]; then
           echo "Using SUSFS branch/commit: $SUSFS_BRANCH"
