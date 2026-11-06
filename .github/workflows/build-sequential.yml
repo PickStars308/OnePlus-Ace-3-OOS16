@@ -655,7 +655,24 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       # ==================================================
-      # 9. 输出构建信息
+      # 9. 上传 SUSFS 补丁失败现场（即使构建步骤失败也执行）
+      # ==================================================
+      - name: Upload SUSFS rejected patches
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: susfs-rejected-patches-${{ github.run_id }}
+          path: |
+            **/*.rej
+            **/kernel/runtime/ksud_integration.c
+            **/kernel/supercall/dispatch.c
+            **/kernel/supercall/supercall.c
+            **/kernel/supercall/supercall.h
+          if-no-files-found: warn
+          retention-days: 7
+
+      # ==================================================
+      # 10. 输出构建信息
       # ==================================================
       - name: Build result
         if: success()
