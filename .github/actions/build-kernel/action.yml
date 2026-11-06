@@ -901,6 +901,19 @@ runs:
         
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
 
+        echo "========== PATCH REPOSITORY COMMIT =========="
+        git -C kernel_patches log -1 --oneline
+        
+        echo "========== KSUN COMMIT =========="
+        git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" log -1 --oneline
+        
+        echo "========== AVAILABLE SUSFS FIX PATCHES =========="
+        find kernel_patches/next -maxdepth 5 -type f \
+          \( -name '*ksud*' -o -name '*integration*' \) -print | sort
+        
+        echo "========== AVAILABLE V2.2.0 PATCHES =========="
+        find kernel_patches/next -path '*v2.2.0*' -type f -print | sort
+
         echo "========== KERNEL PATCHES VERSION =========="
         git -C kernel_patches log -1 --oneline || true
         
