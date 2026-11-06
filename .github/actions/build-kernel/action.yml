@@ -938,7 +938,7 @@ runs:
 
         cd "$KERNEL_PLATFORM_FOLDER"
 
-        # kernel_patches cd63f371 is built for this exact KernelSU-Next commit.
+        # kernel_patches a799fa7a includes the v2.3.0 high-range fixes for KSUVER >= 33341.
         KSUN_REF="${{ inputs.ksu_branch_or_hash }}"
         KSUN_REF="${KSUN_REF:-4c706b5938665866ebe16944a481a7b91e3396af}"
         KSUN_EXPECTED="4c706b5938665866ebe16944a481a7b91e3396af"
