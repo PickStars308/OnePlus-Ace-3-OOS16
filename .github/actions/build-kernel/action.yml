@@ -12,6 +12,10 @@ inputs:
     options:
       - KSUN
       - KSU
+  ksu_channel:
+    description: 'release, dev, or custom'
+    required: false
+    default: custom
   ksu_branch_or_hash:
     description: 'KSU branch or commit hash (empty = auto-detect by ksu_type)'
     required: false
@@ -938,33 +942,37 @@ runs:
 
         cd "$KERNEL_PLATFORM_FOLDER"
 
-        # kernel_patches a799fa7a includes the v2.3.0 high-range fixes for KSUVER >= 33341.
-        KSUN_REF="${{ inputs.ksu_branch_or_hash }}"
-        KSUN_REF="${KSUN_REF:-4c706b5938665866ebe16944a481a7b91e3396af}"
-        KSUN_EXPECTED="4c706b5938665866ebe16944a481a7b91e3396af"
+        KSUN_CHANNEL="${{ inputs.ksu_channel }}"
+        KSUN_INPUT="${{ inputs.ksu_branch_or_hash }}"
+        case "$KSUN_CHANNEL" in
+          release)
+            if [[ -z "$KSUN_INPUT" ]]; then
+              echo "::error::For release, enter an exact release tag (for example v3.4.2)."
+              exit 1
+            fi
+            KSUN_REF="$KSUN_INPUT"
+            ;;
+          dev)
+            KSUN_REF="${KSUN_INPUT:-dev}"
+            ;;
+          custom|"")
+            KSUN_REF="${KSUN_INPUT:-4c706b5938665866ebe16944a481a7b91e3396af}"
+            ;;
+          *)
+            echo "::error::Unknown KernelSU channel: $KSUN_CHANNEL"
+            exit 1
+            ;;
+        esac
 
-        if [[ "$KSUN_REF" != "$KSUN_EXPECTED" ]]; then
-          echo "::error::SUSFS v2.2.0 fix patches require KernelSU-Next $KSUN_EXPECTED"
-          echo "::error::Received KernelSU-Next ref: $KSUN_REF"
-          exit 1
-        fi
-
-        echo "Installing KernelSU-Next commit $KSUN_REF"
-
-        curl --fail --location --retry 3 \
-          --proto '=https' \
-          "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${KSUN_REF}/kernel/setup.sh" \
-          | bash -s "$KSUN_REF"
-
+        echo "Installing KernelSU-Next from $KSUN_CHANNEL ref $KSUN_REF"
+        git clone --filter=blob:none --no-checkout https://github.com/KernelSU-Next/KernelSU-Next.git KernelSU-Next
         KSUN_DIR="$KERNEL_PLATFORM_FOLDER/KernelSU-Next"
-        test -d "$KSUN_DIR/.git"
-
+        git -C "$KSUN_DIR" fetch --no-tags origin "$KSUN_REF"
+        git -C "$KSUN_DIR" checkout --detach FETCH_HEAD
         ACTUAL_COMMIT="$(git -C "$KSUN_DIR" rev-parse HEAD)"
-
-        if [[ "$ACTUAL_COMMIT" != "$KSUN_EXPECTED" ]]; then
-          echo "::error::KernelSU-Next commit mismatch: $ACTUAL_COMMIT"
-          exit 1
-        fi
+        echo "KSUN_TAG=$KSUN_REF" >> "$GITHUB_ENV"
+        echo "KSUN_COMMIT_SHA=$ACTUAL_COMMIT" >> "$GITHUB_ENV"
+        echo "KernelSU-Next commit: $ACTUAL_COMMIT"
 
         git -C "$KSUN_DIR" submodule update --init --recursive
 
@@ -975,35 +983,25 @@ runs:
           's/.*KERNEL_SU_UAPI_VERSION[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' \
           "$UAPI_HEADER" | head -n 1)"
 
-        if [[ "$UAPI_VERSION" != "5" ]]; then
-          echo "::error::Expected UAPI 5 for the pinned compatible commit, detected $UAPI_VERSION"
+        if [[ -z "$UAPI_VERSION" ]]; then
+          echo "::error::Cannot determine KernelSU-Next UAPI version"
           exit 1
         fi
-
-        echo "KSUN_TAG=$KSUN_REF" >> "$GITHUB_ENV"
-        echo "KSUN_COMMIT_SHA=$ACTUAL_COMMIT" >> "$GITHUB_ENV"
         echo "KSUN_UAPI_VERSION=$UAPI_VERSION" >> "$GITHUB_ENV"
-
-        echo "KernelSU-Next ref: $KSUN_REF"
-        echo "Commit: $ACTUAL_COMMIT"
-        echo "UAPI: $UAPI_VERSION"
+        echo "KernelSU-Next UAPI: $UAPI_VERSION"
 
         cd "$KSUN_DIR/kernel"
 
         COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
-        EXPECTED_COMMITS_COUNT=3355
-
-        if [[ "$COMMITS_COUNT" != "$EXPECTED_COMMITS_COUNT" ]]; then
-          echo "::error::KernelSU-Next history count mismatch: expected $EXPECTED_COMMITS_COUNT, got $COMMITS_COUNT"
-          echo "::error::Refusing to generate a different KernelSU version than 33355"
-          exit 1
+        if [[ "$COMMITS_COUNT" -lt 2684 ]]; then
+          BASE_VERSION=10200
+        else
+          BASE_VERSION=30000
         fi
-
-        BASE_VERSION=30000
         KSU_VERSION=$((COMMITS_COUNT + BASE_VERSION))
-
-        if [[ "$KSU_VERSION" != "33355" ]]; then
-          echo "::error::Expected KernelSU-Next version 33355, got $KSU_VERSION"
+        echo "Selected KernelSU-Next version: $KSU_VERSION"
+        if [[ "$KSUN_CHANNEL" == "custom" && -z "$KSUN_INPUT" && "$KSU_VERSION" != "33355" ]]; then
+          echo "::error::Default custom commit was expected to produce 33355, got $KSU_VERSION"
           exit 1
         fi
         sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
@@ -1042,12 +1040,21 @@ runs:
         echo "::group::Add KernelSU"
         cd "$KERNEL_PLATFORM_FOLDER"
         echo "Adding KernelSU..."
+        KSU_CHANNEL="${{ inputs.ksu_channel }}"
         KSU_INPUT="${{ inputs.ksu_branch_or_hash }}"
-        if [ -z "$KSU_INPUT" ]; then
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -
-        else
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "$KSU_INPUT"
-        fi
+        case "$KSU_CHANNEL" in
+          release)
+            if [[ -z "$KSU_INPUT" ]]; then
+              echo "::error::For release, enter an exact KernelSU release tag."
+              exit 1
+            fi
+            KSU_REF="$KSU_INPUT"
+            ;;
+          dev) KSU_REF="${KSU_INPUT:-main}" ;;
+          custom|"") KSU_REF="${KSU_INPUT:-main}" ;;
+          *) echo "::error::Invalid KernelSU channel: $KSU_CHANNEL"; exit 1 ;;
+        esac
+        curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/setup.sh" | bash -s "$KSU_REF"
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU" submodule update --init --recursive
         cd "$KERNEL_PLATFORM_FOLDER/KernelSU/kernel"
         BASE_VERSION=30000
