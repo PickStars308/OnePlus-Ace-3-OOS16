@@ -2071,6 +2071,7 @@ runs:
         KCPPFLAGS="$KCPPFLAGS -DCONFIG_OPTIMIZE_INLINING"
         # 设置 ccache 基础目录，避免 set -u 下变量未定义
         export CCACHE_BASEDIR="${CCACHE_BASEDIR:-${WORKSPACE:-$GITHUB_WORKSPACE}}"
+        export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-5G}"
         
         echo "============================================"
         echo "🔧 Build Configuration"
