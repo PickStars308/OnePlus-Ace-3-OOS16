@@ -904,11 +904,24 @@ runs:
         echo "Pinning kernel_patches to SUSFS v2.3.0 high-33341..."
         PATCH_REF="ffa6aa5a0a"
 
-        echo "Fetching exact kernel_patches commit: $PATCH_REF"
+        echo "Fetching kernel_patches main history..."
+        git -C kernel_patches fetch --no-tags origin main
         
-        git -C kernel_patches fetch --no-tags origin "$PATCH_REF"
+        echo "Verifying target commit: ${PATCH_REF}"
+        if ! git -C kernel_patches cat-file -e "${PATCH_REF}^{commit}" 2>/dev/null; then
+            echo "❌ Target commit ${PATCH_REF} is not present locally."
+            echo "Repository history:"
+            git -C kernel_patches log --oneline --all -10
+            exit 1
+        fi
         
-        git -C kernel_patches checkout --detach FETCH_HEAD
+        PATCH_COMMIT="$(git -C kernel_patches rev-parse "${PATCH_REF}^{commit}")"
+        
+        echo "Switching to kernel_patches commit: ${PATCH_COMMIT}"
+        git -C kernel_patches switch --detach "$PATCH_COMMIT"
+        
+        echo "========== PINNED PATCH VERSION =========="
+        git -C kernel_patches log -1 --format='%H%n%s'
         
         echo "========== PINNED PATCH VERSION =========="
         git -C kernel_patches log -1 --format='%H %s'
