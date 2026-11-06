@@ -13,7 +13,7 @@ inputs:
       - KSUN
       - KSU
   ksu_branch_or_hash:
-    description: 'KSU branch or commit hash (empty = auto-detect by ksu_type)'
+    description: 'KSUN branch/tag/commit (empty = use the latest dev branch; use a tag such as v3.4.2 for stable)'
     required: false
     type: string
     default: ""
@@ -83,15 +83,6 @@ outputs:
   zip_name:
     description: 'Name of the generated flashable ZIP'
     value: ${{ steps.create_zip.outputs.zip_name }}
-  ksu_uapi_version:
-    description: 'KernelSU UAPI version selected to match the latest manager'
-    value: ${{ steps.add_ksun.outputs.ksu_uapi_version }}
-  manager_apk_name:
-    description: 'Matching KernelSU Next Manager APK filename'
-    value: ${{ steps.download_manager_apk.outputs.apk_name }}
-  manager_version:
-    description: 'KernelSU Next Manager release tag'
-    value: ${{ steps.add_ksun.outputs.manager_version }}
 
 runs:
   using: 'composite'
@@ -588,7 +579,7 @@ runs:
         
         echo "✅ Detected Clang: $CLANG_VERSION"
         echo "::endgroup::"
-    
+
     - name: Check or Detect Rust & bindgen
       shell: bash
       if: ${{ env.OP_RUST_BUILD == 'true' }}
@@ -908,14 +899,13 @@ runs:
           return 1
         }
         
+        # Keep full history: the KSUN/SUSFS resolver below needs to find the
+        # patch commit whose metadata names the exact KernelSU-Next source SHA.
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "0"
-
-        echo "Fetching full kernel_patches history for automatic KernelSU/SUSFS matching..."
         git -C kernel_patches fetch --no-tags origin main
-        KERNEL_PATCHES_FOLDER="$(realpath kernel_patches)"
-        echo "KERNEL_PATCHES_FOLDER=$KERNEL_PATCHES_FOLDER" >> "$GITHUB_ENV"
-        echo "kernel_patches latest: $(git -C kernel_patches rev-parse FETCH_HEAD)"
-        echo "SUSFS fix patch selection will be resolved after KernelSU-Next source version is detected."
+        git -C kernel_patches checkout --detach origin/main
+        echo "========== KERNEL PATCHES BASE =========="
+        git -C kernel_patches log -1 --format='%H %s'
         
         if [ "${{ env.OP_SUSFS }}" = true ]; then
           echo "Using SUSFS branch/commit: $SUSFS_BRANCH"
@@ -938,169 +928,133 @@ runs:
         sed -i 's/protected_modules = \[.*\]/protected_modules = []/' common/modules.bzl || true
         echo "::endgroup::"
 
-    - name: Add KernelSU Next (auto-match latest compatible source)
-      id: add_ksun
+    - name: Add KernelSU Next
       shell: bash
       if: ${{ inputs.ksu_type == 'KSUN' }}
-      env:
-        GH_TOKEN: ${{ inputs.github_token }}
       run: |
         set -euo pipefail
-        echo "::group::Resolve KernelSU-Next + Manager + SUSFS compatibility"
+        echo "::group::Add KernelSU Next"
         cd "$KERNEL_PLATFORM_FOLDER"
+        echo "Adding KernelSU Next..."
         KSU_INPUT="${{ inputs.ksu_branch_or_hash }}"
-        KSUN_FOLDER="$KERNEL_PLATFORM_FOLDER/KernelSU-Next"
 
-        # Integrate the upstream next branch first. We then select the newest
-        # source revision that matches the UAPI of the latest official Manager
-        # APK and has an exact SUSFS v2.3.0 patch-set reference.
         if [ -z "$KSU_INPUT" ]; then
+          # Track the current dev branch by default. The official setup script
+          # accepts "dev" as its branch selector; "next" is the script host,
+          # not necessarily a fetchable repository branch.
           curl --fail --location --proto '=https' -LSs \
-            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
         else
           curl --fail --location --proto '=https' -LSs \
             "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "$KSU_INPUT"
         fi
-        test -d "$KSUN_FOLDER/.git"
-        if [ "$(git -C "$KSUN_FOLDER" rev-parse --is-shallow-repository)" = "true" ]; then
-          git -C "$KSUN_FOLDER" fetch --unshallow origin next
-        else
-          git -C "$KSUN_FOLDER" fetch --no-tags origin next
-        fi
-        git -C "$KSUN_FOLDER" fetch --tags origin
-        git -C "$KERNEL_PATCHES_FOLDER" fetch --no-tags origin main
-
-        # Get the latest stable official release and its non-spoofed Manager APK.
-        RELEASE_JSON="$(curl --fail --location --retry 3 \
-          -H "Authorization: Bearer $GH_TOKEN" \
-          -H "Accept: application/vnd.github+json" \
-          https://api.github.com/repos/KernelSU-Next/KernelSU-Next/releases/latest)"
-        MANAGER_TAG="$(jq -r '.tag_name // empty' <<< "$RELEASE_JSON")"
-        if [ -z "$MANAGER_TAG" ] || [ "$MANAGER_TAG" = "null" ]; then
-          echo "::error::Could not resolve the latest official KernelSU-Next Manager release."
-          exit 1
-        fi
-        git -C "$KSUN_FOLDER" fetch origin "refs/tags/$MANAGER_TAG:refs/tags/$MANAGER_TAG" 2>/dev/null || true
-        MANAGER_HEADER="$(git -C "$KSUN_FOLDER" show "$MANAGER_TAG:uapi/supercall.h" 2>/dev/null || true)"
-        MANAGER_UAPI="$(sed -nE 's/.*KERNEL_SU_UAPI_VERSION[^0-9]*([0-9]+).*/\1/p' <<< "$MANAGER_HEADER" | head -n1)"
-        if [ -z "$MANAGER_UAPI" ]; then
-          echo "::error::Could not read UAPI version from Manager release source tag $MANAGER_TAG."
-          exit 1
-        fi
-        APK_INFO="$(jq -r '[.assets[] | select(.name | test("-release\\.apk$"; "i")) | select(.name | test("spoofed"; "i") | not)] | sort_by(.name) | last | [.name, .browser_download_url] | @tsv' <<< "$RELEASE_JSON")"
-        MANAGER_APK_NAME="$(cut -f1 <<< "$APK_INFO")"
-        MANAGER_APK_URL="$(cut -f2- <<< "$APK_INFO")"
-        if [ -z "$MANAGER_APK_NAME" ] || [ -z "$MANAGER_APK_URL" ] || [ "$MANAGER_APK_NAME" = "null" ]; then
-          echo "::error::Latest release $MANAGER_TAG does not contain a non-spoofed Manager APK asset."
+        
+        KSUN_FOLDER="$KERNEL_PLATFORM_FOLDER/KernelSU-Next"
+        if [ ! -d "$KSUN_FOLDER/.git" ]; then
+          echo "::error::KernelSU-Next setup.sh did not create the repository"
           exit 1
         fi
 
-        echo "Latest official Manager: $MANAGER_TAG"
-        echo "Manager UAPI: $MANAGER_UAPI"
-        echo "Manager APK asset: $MANAGER_APK_NAME"
-
-        # Build a lookup from KernelSU source SHA -> SUSFS v2.3.0 patch commit.
-        declare -A PATCH_BY_KSU=()
-        while IFS= read -r patch_commit; do
-          [ -n "$patch_commit" ] || continue
-          body="$(git -C "$KERNEL_PATCHES_FOLDER" show -s --format=%B "$patch_commit")"
-          grep -Eqi 'SusFS[[:space:]]*2\.3\.0' <<< "$body" || continue
-          source_sha="$(grep -Eo 'KernelSU-Next:[[:space:]]*https://github\.com/KernelSU-Next/KernelSU-Next/commit/[0-9a-fA-F]{40}' <<< "$body" | grep -Eo '[0-9a-fA-F]{40}$' | head -n1 | tr 'A-F' 'a-f')"
-          [ -n "$source_sha" ] && PATCH_BY_KSU["$source_sha"]="$patch_commit"
-        done < <(git -C "$KERNEL_PATCHES_FOLDER" log origin/main --format='%H' --grep='SusFS 2.3.0' -i -n 1500)
-
-        if [ "${#PATCH_BY_KSU[@]}" -eq 0 ]; then
-          echo "::error::No KernelSU-Next/SUSFS v2.3.0 source pair found in kernel_patches history."
-          exit 1
-        fi
-
-        if [ -n "$KSU_INPUT" ]; then
-          SELECTED_KSU_SHA="$(git -C "$KSUN_FOLDER" rev-parse "$KSU_INPUT^{commit}")"
-          CANDIDATES=("$SELECTED_KSU_SHA")
-        else
-          mapfile -t CANDIDATES < <(git -C "$KSUN_FOLDER" rev-list --date-order origin/next)
-        fi
-
-        SELECTED_KSU_SHA=""
-        SELECTED_PATCH_SHA=""
-        SELECTED_UAPI=""
-        for candidate in "${CANDIDATES[@]}"; do
-          header="$(git -C "$KSUN_FOLDER" show "$candidate:uapi/supercall.h" 2>/dev/null || true)"
-          candidate_uapi="$(sed -nE 's/.*KERNEL_SU_UAPI_VERSION[^0-9]*([0-9]+).*/\1/p' <<< "$header" | head -n1)"
-          [ "$candidate_uapi" = "$MANAGER_UAPI" ] || continue
-          candidate_sha="${candidate,,}"
-          patch_sha="${PATCH_BY_KSU[$candidate_sha]:-}"
-          [ -n "$patch_sha" ] || continue
-          SELECTED_KSU_SHA="$candidate"
-          SELECTED_PATCH_SHA="$patch_sha"
-          SELECTED_UAPI="$candidate_uapi"
-          break
-        done
-
-        if [ -z "$SELECTED_KSU_SHA" ]; then
-          echo "::error::No KernelSU-Next commit on next matches Manager UAPI $MANAGER_UAPI and has an exact SUSFS v2.3.0 patch set."
-          echo "The build is stopped rather than producing a mismatched kernel/Manager pair."
-          exit 1
-        fi
-
-        git -C "$KSUN_FOLDER" checkout --detach "$SELECTED_KSU_SHA"
+        # Use the ref selected by the official setup.sh (tag/branch/commit).
+        # Do not fetch origin/next: official releases may be checked out as tags
+        # and the remote may not advertise a branch named next.
         git -C "$KSUN_FOLDER" submodule update --init --recursive
-        git -C "$KERNEL_PATCHES_FOLDER" checkout --detach "$SELECTED_PATCH_SHA"
-
-        DISPATCH_FILE="$KSUN_FOLDER/kernel/supercall/dispatch.c"
-        if [ ! -f "$DISPATCH_FILE" ] || ! grep -q 'cmd.uapi_version = KERNEL_SU_UAPI_VERSION' "$DISPATCH_FILE"; then
-          echo "::error::Selected KernelSU source has an invalid or incomplete UAPI dispatcher."
+        KSUN_COMMIT_SHA="$(git -C "$KSUN_FOLDER" rev-parse HEAD)"
+        KSUN_TAG="$(git -C "$KSUN_FOLDER" describe --tags --exact-match HEAD 2>/dev/null || echo unknown)"
+        UAPI_HEADER="$KSUN_FOLDER/uapi/supercall.h"
+        if [ ! -f "$UAPI_HEADER" ]; then
+          UAPI_HEADER="$(find "$KSUN_FOLDER" -path '*/uapi/supercall.h' -print -quit)"
+        fi
+        if [ -z "$UAPI_HEADER" ] || [ ! -f "$UAPI_HEADER" ]; then
+          echo "::error::Cannot locate KernelSU-Next uapi/supercall.h"
           exit 1
         fi
+        KSUN_UAPI_VERSION="$(sed -nE 's/.*KERNEL_SU_UAPI_VERSION[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$UAPI_HEADER" | head -n1)"
+        if [[ ! "$KSUN_UAPI_VERSION" =~ ^(5|6)$ ]]; then
+          echo "::error::Unsupported KernelSU-Next UAPI: ${KSUN_UAPI_VERSION:-unknown}; this action currently supports UAPI 5 and 6 only"
+          exit 1
+        fi
+        echo "KSUN_COMMIT_SHA=$KSUN_COMMIT_SHA" >> "$GITHUB_ENV"
+        echo "KSUN_UAPI_VERSION=$KSUN_UAPI_VERSION" >> "$GITHUB_ENV"
+        echo "KSUN_TAG=$KSUN_TAG" >> "$GITHUB_ENV"
 
-        PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0"
-        for required_patch in fix_init.c.patch overwrite_hook_mode.patch ksu_toolkit.patch; do
-          if [ ! -s "$PATCH_DIR/$required_patch" ]; then
-            echo "::error::Required SUSFS v2.3.0 patch missing: $PATCH_DIR/$required_patch"
+        echo "========== KernelSU-Next VERSION =========="
+        echo "Tag: $KSUN_TAG"
+        echo "Commit: $KSUN_COMMIT_SHA"
+        echo "UAPI: $KSUN_UAPI_VERSION"
+
+        # Resolve the SUSFS 2.3.0 patch commit by exact KSUN source SHA.
+        # Never apply a patchset merely because it has the same UAPI number.
+        if [ "${{ env.OP_SUSFS }}" = "true" ]; then
+          PATCH_REPO="$KERNEL_PATCHES_FOLDER"
+          MATCHED_PATCH_COMMIT=""
+          while IFS= read -r candidate; do
+            [ -n "$candidate" ] || continue
+            body="$(git -C "$PATCH_REPO" show -s --format=%B "$candidate")"
+            source_sha="$(printf '%s\n' "$body" | grep -Eo 'KernelSU-Next:[[:space:]]*https://github\.com/KernelSU-Next/KernelSU-Next/commit/[0-9a-fA-F]{40}' | grep -Eo '[0-9a-fA-F]{40}$' | head -n1 || true)"
+            if [ "${source_sha,,}" = "${KSUN_COMMIT_SHA,,}" ]; then
+              MATCHED_PATCH_COMMIT="$candidate"
+              break
+            fi
+          done < <(git -C "$PATCH_REPO" log origin/main --format='%H' --grep='SusFS 2.3.0' -i)
+
+          if [ -z "$MATCHED_PATCH_COMMIT" ]; then
+            echo "::error::No SUSFS 2.3.0 patch commit explicitly matches KSUN $KSUN_COMMIT_SHA (UAPI $KSUN_UAPI_VERSION). Refusing an unverified patch combination."
             exit 1
           fi
-        done
-
-        # Confirm that the exact patch commit actually applies to this source
-        # tree before the kernel build begins. The full application is checked
-        # by the dedicated SUSFS patching step below.
-        echo "KSU_COMMIT_SHA=$SELECTED_KSU_SHA" >> "$GITHUB_ENV"
-        echo "KSUN_UAPI_VERSION=$SELECTED_UAPI" >> "$GITHUB_ENV"
-        echo "PATCH_COMMIT_SHA=$SELECTED_PATCH_SHA" >> "$GITHUB_ENV"
-        echo "PATCH_DIR=$PATCH_DIR" >> "$GITHUB_ENV"
-        echo "MANAGER_RELEASE_TAG=$MANAGER_TAG" >> "$GITHUB_ENV"
-        echo "MANAGER_UAPI_VERSION=$MANAGER_UAPI" >> "$GITHUB_ENV"
-        echo "MANAGER_APK_NAME=$MANAGER_APK_NAME" >> "$GITHUB_ENV"
-        echo "MANAGER_APK_URL=$MANAGER_APK_URL" >> "$GITHUB_ENV"
-        echo "ksu_uapi_version=$SELECTED_UAPI" >> "$GITHUB_OUTPUT"
-        echo "manager_version=$MANAGER_TAG" >> "$GITHUB_OUTPUT"
-
-        cd "$KSUN_FOLDER/kernel"
+          git -C "$PATCH_REPO" checkout --detach "$MATCHED_PATCH_COMMIT"
+          echo "PATCH_COMMIT_SHA=$MATCHED_PATCH_COMMIT" >> "$GITHUB_ENV"
+          echo "========== MATCHED SUSFS PATCH =========="
+          git -C "$PATCH_REPO" log -1 --format='%H %s'
+        fi
+        
+        cd "$KERNEL_PLATFORM_FOLDER/KernelSU-Next/kernel"
+        
         COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
-        if [ "$COMMITS_COUNT" -lt 2684 ]; then BASE_VERSION=10200; else BASE_VERSION=30000; fi
-        KSU_VERSION=$((COMMITS_COUNT + BASE_VERSION))
-        echo "COMMITS_COUNT=$COMMITS_COUNT"
-        echo "KSU_VERSION=$KSU_VERSION"
+        
+        if [ $COMMITS_COUNT -lt 2684 ]; then
+          BASE_VERSION=10200
+        else
+          BASE_VERSION=30000
+        fi
+        
+        KSU_VERSION=$(expr $COMMITS_COUNT "+" $BASE_VERSION)
         sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
-
+        
         if [ -f ksu.c ]; then
           sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
         fi
+        
         if [[ "$KSU_VERSION" -gt 33095 ]] && [[ "${{ env.KERNEL_VER }}" == "6.12" ]]; then
           sed -i 's|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include|ccflags-y += -I$(KSU_KERNEL_DIR) -I$(KSU_KERNEL_DIR)/include -I$(KSU_KERNEL_DIR)/include/uapi|' Kbuild
           sed -i 's|$(src)|$(abspath $(src))|' Kbuild
           sed -i 's|$(srctree)/$(src)|$(abspath $(srctree)/$(src))|' Kbuild
         fi
-        if [ "$KSU_VERSION" -lt 12884 ]; then echo "NEED_HOOKS=true" >> "$GITHUB_ENV"; else echo "NEED_HOOKS=false" >> "$GITHUB_ENV"; fi
-
+        
+        if [ "$KSU_VERSION" -lt 12884 ]; then
+          echo "NEED_HOOKS=true" >> $GITHUB_ENV
+        else
+          echo "NEED_HOOKS=false" >> $GITHUB_ENV
+        fi
+        
         cd ..
-        echo "KSUVER=$KSU_VERSION" >> "$GITHUB_ENV"
+        KSU_COMMIT_SHA=$(git rev-parse HEAD)
+        echo "KSU_COMMIT_SHA=$KSU_COMMIT_SHA" >> $GITHUB_ENV
+        
+        
+        echo "Add KSUN Configuration Settings"
+        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
+        CONFIG_KSU=y
+        CONFIG_KSU_KPROBES_HOOK=n
+        EOF
+        
         echo "KSUN" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
         echo "$KSU_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "$SELECTED_UAPI" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-        echo "Selected KernelSU-Next: $SELECTED_KSU_SHA"
-        echo "Selected SUSFS patch commit: $SELECTED_PATCH_SHA"
-        echo "Matched Manager release: $MANAGER_TAG (UAPI $MANAGER_UAPI)"
+        echo "UAPI=$KSUN_UAPI_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "KSUN_COMMIT=$KSUN_COMMIT_SHA" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
+        echo "KernelSU Next Version: $KSU_VERSION"
+        echo "✅ KernelSU Next added (commit: ${KSU_COMMIT_SHA:0:8})"
         echo "::endgroup::"
 
     - name: Add KernelSU
@@ -1151,30 +1105,6 @@ runs:
         echo "✅ KernelSU added (commit: ${KSU_COMMIT_SHA:0:8})"
         echo "::endgroup::"
 
-        echo "========================================="
-        echo "DEBUG: KernelSU / SUSFS source versions"
-        echo "========================================="
-        
-        echo "[KernelSU-Next]"
-        git -C "$KSUN_FOLDER" rev-parse HEAD
-        git -C "$KSUN_FOLDER" log -1 --format='%H%n%s'
-        
-        echo "[SUSFS]"
-        git -C "$SUSFS_FOLDER" rev-parse HEAD
-        git -C "$SUSFS_FOLDER" log -1 --format='%H%n%s'
-        
-        echo "[kernel_patches]"
-        git -C "$KERNEL_PATCHES_FOLDER" rev-parse HEAD
-        git -C "$KERNEL_PATCHES_FOLDER" log -1 --format='%H%n%s'
-        
-        echo "[KSU version]"
-        echo "${KSU_VERSION:-NOT_SET}"
-        
-        echo "[Patch files]"
-        find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' -printf '%f\n' | sort
-        
-        echo "========================================="
-
     - name: Apply SUSFS Patches
       shell: bash
       if: ${{ env.OP_SUSFS == 'true' }}
@@ -1201,31 +1131,7 @@ runs:
         else
           echo "NEED_HOOKS=false" >> $GITHUB_ENV
         fi
-
-        # Initialize SUSFS patch directory in the current shell
-        echo "Initializing SUSFS patch directory..."
         
-        KERNEL_PATCHES_FOLDER="$GITHUB_WORKSPACE/kernel_patches"
-        PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0"
-        
-        if [ ! -d "$PATCH_DIR" ]; then
-            echo "ERROR: SUSFS v2.3.0 patch directory not found!"
-            echo "Expected path: $PATCH_DIR"
-            echo "Workspace: $GITHUB_WORKSPACE"
-        
-            if [ -d "$KERNEL_PATCHES_FOLDER" ]; then
-                echo "Available SUSFS patch directories:"
-                find "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches" \
-                    -maxdepth 2 -type d -print
-            else
-                echo "ERROR: kernel_patches repository was not found."
-            fi
-        
-            exit 1
-        fi
-        
-        echo "SUSFS patch directory: $PATCH_DIR"
-
         case "$susfs_version" in
           "v1.5.8")
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
@@ -1303,182 +1209,26 @@ runs:
               patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
             fi
             ;;
-          v2.3.0)
-            echo "========================================="
-            echo "Applying SUSFS v2.3.0 patches"
-            echo "========================================="
-        
-            cd "$KSUN_FOLDER"
-        
-            BASE_PATCH="$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
-        
-            if [ ! -f "$BASE_PATCH" ]; then
-                echo "ERROR: SUSFS base patch not found:"
-                echo "$BASE_PATCH"
-                exit 1
-            fi
-        
-            if [ ! -d "$PATCH_DIR" ]; then
-                echo "ERROR: SUSFS fix patch directory not found:"
-                echo "$PATCH_DIR"
-                exit 1
-            fi
-        
-            echo "Checking whether SUSFS base patch is already applied..."
-        
-            if patch --dry-run -R -p1 < "$BASE_PATCH" >/dev/null 2>&1; then
-                echo "SUSFS base patch is already applied."
+          "v2.2.0"|"v2.3.0")
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              cd "$KSUN_FOLDER"
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
+                echo "Patching file: $file with fix_$file.patch"
+                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
+              done
+              echo "Patching Hook Mode!"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
+              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
+              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
             else
-                echo "Applying SUSFS base patch..."
-        
-                if patch -p1 --forward --fuzz=3 < "$BASE_PATCH"; then
-                    echo "SUSFS base patch applied successfully."
-                else
-                    echo "Base patch had rejected hunks. Checking fix patches..."
-        
-                    if [ ! -d "./kernel" ]; then
-                        echo "ERROR: KernelSU kernel directory not found."
-                        exit 1
-                    fi
-        
-                    mapfile -t REJECTS < <(
-                        find ./kernel -maxdepth 2 -type f -name '*.rej' -print | sort
-                    )
-        
-                    if [ "${#REJECTS[@]}" -eq 0 ]; then
-                        echo "ERROR: Base patch failed without generating reject files."
-                        exit 1
-                    fi
-        
-                    for reject_file in "${REJECTS[@]}"; do
-                        reject_name="$(basename "$reject_file" .rej)"
-                        fix_patch="$PATCH_DIR/fix_${reject_name}.patch"
-        
-                        echo "Rejected file: $reject_file"
-                        echo "Looking for fix patch: $fix_patch"
-        
-                        if [ ! -f "$fix_patch" ]; then
-                            echo "ERROR: Matching fix patch does not exist:"
-                            echo "$fix_patch"
-                            exit 1
-                        fi
-        
-                        echo "Applying fix patch: $(basename "$fix_patch")"
-
-                        if patch -p1 --forward --fuzz=3 < "$fix_patch"; then
-                            echo "✅ Fix patch applied successfully."
-                            rm -f "$reject_file"
-                        else
-                            echo "::error::Fix patch failed: $(basename "$fix_patch")"
-                        
-                            source_file="${reject_file%.rej}"
-                        
-                            echo ""
-                            echo "========== REJECT FILE =========="
-                            if [ -f "$reject_file" ]; then
-                                cat "$reject_file"
-                            else
-                                echo "Reject file not found: $reject_file"
-                            fi
-                        
-                            echo ""
-                            echo "========== ORIGINAL SOURCE FILE =========="
-                            if [ -f "$source_file" ]; then
-                                sed -n '1,260p' "$source_file"
-                            else
-                                echo "Source file not found: $source_file"
-                            fi
-                        
-                            echo ""
-                            echo "========== FIX PATCH CONTENT =========="
-                            cat "$fix_patch"
-                        
-                            echo ""
-                            echo "========== CURRENT DIRECTORY =========="
-                            pwd
-                        
-                            exit 1
-                        fi
-
-                    done
-                fi
+              cd "$KSU_FOLDER"
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
             fi
-        
-            echo "Checking for remaining rejected patches..."
-        
-            if find ./kernel -maxdepth 2 -type f -name '*.rej' -print -quit | grep -q .; then
-                echo "ERROR: Unresolved patch reject files remain:"
-                find ./kernel -maxdepth 2 -type f -name '*.rej' -print
-                exit 1
-            fi
-        
-            echo "Applying overwrite_hook_mode.patch..."
-            patch -p1 --forward --fuzz=3 < "$PATCH_DIR/overwrite_hook_mode.patch"
-        
-            echo "Applying ksu_toolkit.patch..."
-            patch -p1 --forward --fuzz=3 < "$PATCH_DIR/ksu_toolkit.patch"
-        
-            echo "SUSFS v2.3.0 patches applied successfully."
-
-
-            echo "========================================="
-            echo "DEBUG: SUSFS PATCH REJECT FILES"
-            echo "========================================="
-            
-            echo "[1] All reject files:"
-            
-            find "$KSUN_FOLDER/kernel" -type f -name '*.rej' -print || true
-            
-            echo
-            echo "[2] init.c reject:"
-            
-            if [ -f "$KSUN_FOLDER/kernel/core/init.c.rej" ]; then
-                cat "$KSUN_FOLDER/kernel/core/init.c.rej"
-            else
-                echo "No init.c.rej"
-            fi
-            
-            echo
-            echo "[3] sucompat.c reject:"
-            
-            if [ -f "$KSUN_FOLDER/kernel/feature/sucompat.c.rej" ]; then
-                cat "$KSUN_FOLDER/kernel/feature/sucompat.c.rej"
-            else
-                echo "No sucompat.c.rej"
-            fi
-            
-            echo
-            echo "[4] setuid_hook.c reject:"
-            
-            if [ -f "$KSUN_FOLDER/kernel/hook/setuid_hook.c.rej" ]; then
-                cat "$KSUN_FOLDER/kernel/hook/setuid_hook.c.rej"
-            else
-                echo "No setuid_hook.c.rej"
-            fi
-            
-            echo
-            echo "[5] dispatch.c reject:"
-            
-            if [ -f "$KSUN_FOLDER/kernel/supercall/dispatch.c.rej" ]; then
-                cat "$KSUN_FOLDER/kernel/supercall/dispatch.c.rej"
-            else
-                echo "No dispatch.c.rej"
-            fi
-            
-            echo
-            echo "[6] supercall.c reject:"
-            
-            if [ -f "$KSUN_FOLDER/kernel/supercall/supercall.c.rej" ]; then
-                cat "$KSUN_FOLDER/kernel/supercall/supercall.c.rej"
-            else
-                echo "No supercall.c.rej"
-            fi
-            
-            echo
-            echo "========================================="
-            echo "DEBUG OUTPUT FINISHED"
-            echo "========================================="
-
+            ;;
+          *)
+            echo "::error::Unsupported SUSFS version: $susfs_version"
+            exit 1
             ;;
         esac
         
@@ -1652,116 +1402,6 @@ runs:
         echo "✅ BBG LSM added"
         echo "::endgroup::"
 
-    - name: Debug SUSFS Patch Rejects
-      if: always()
-      shell: bash
-      run: |
-        set +e
-    
-        echo "========================================="
-        echo "DEBUG: SUSFS PATCH REJECT FILES"
-        echo "========================================="
-    
-        echo "[1] Searching all reject files..."
-    
-        find "$GITHUB_WORKSPACE" -type f -name '*.rej' -print
-    
-        echo
-        echo "[2] Printing reject file contents..."
-    
-        while IFS= read -r reject_file; do
-            echo
-            echo "========================================="
-            echo "FILE: $reject_file"
-            echo "========================================="
-            cat "$reject_file"
-        done < <(find "$GITHUB_WORKSPACE" -type f -name '*.rej' -print)
-    
-        echo
-        echo "========================================="
-        echo "DEBUG: SOURCE COMMITS"
-        echo "========================================="
-    
-        find "$GITHUB_WORKSPACE" -type d -name "KernelSU-Next" -print
-        find "$GITHUB_WORKSPACE" -type d -name "kernel_patches" -print
-        echo
-        echo "========================================="
-        echo "DEBUG: ACTUAL SOURCE COMMITS"
-        echo "========================================="
-        
-        KSUN_DIR="$(find "$GITHUB_WORKSPACE" -type d -name "KernelSU-Next" -print -quit)"
-        KERNEL_PATCHES_DIR="$GITHUB_WORKSPACE/kernel_patches"
-        SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu"
-        
-        echo "[KernelSU-Next]"
-        if [ -n "$KSUN_DIR" ] && [ -d "$KSUN_DIR/.git" ]; then
-            git -C "$KSUN_DIR" rev-parse HEAD
-            git -C "$KSUN_DIR" log -1 --format='%s'
-        else
-            echo "KernelSU-Next Git repository not found"
-        fi
-        
-        echo
-        echo "[kernel_patches]"
-        if [ -d "$KERNEL_PATCHES_DIR/.git" ]; then
-            git -C "$KERNEL_PATCHES_DIR" rev-parse HEAD
-            git -C "$KERNEL_PATCHES_DIR" log -1 --format='%s'
-        else
-            echo "kernel_patches Git repository not found"
-        fi
-        
-        echo
-        echo "[susfs4ksu]"
-        if [ -d "$SUSFS_DIR/.git" ]; then
-            git -C "$SUSFS_DIR" rev-parse HEAD
-            git -C "$SUSFS_DIR" log -1 --format='%s'
-        else
-            echo "susfs4ksu Git repository not found"
-        fi
-        
-        echo
-        echo "[KernelSU version setting]"
-        grep -nE 'KSU_VERSION=|KSUN_COMMIT=' "$GITHUB_WORKSPACE/.github/workflows/"*.yml
-
-        echo "DEBUG FINISHED"
-
-    - name: Debug KernelSU and SUSFS Versions
-      if: always()
-      shell: bash
-      run: |
-        set +e
-    
-        echo "========== WORKFLOW VERSION SETTINGS =========="
-        grep -R -nE 'KSU_VERSION|KSUN_COMMIT|SUSFS_COMMIT|PATCH_REF' "$GITHUB_WORKSPACE/.github/workflows"
-    
-        echo
-        echo "========== KERNELSU SOURCE =========="
-        KSUN_DIR="$(find "$GITHUB_WORKSPACE" -type d -name KernelSU-Next -print -quit)"
-        if [ -n "$KSUN_DIR" ]; then
-            git -C "$KSUN_DIR" rev-parse HEAD
-            git -C "$KSUN_DIR" log -1 --format='%H%n%s'
-            grep -R -n 'KERNEL_SU_UAPI_VERSION' "$KSUN_DIR/kernel" "$KSUN_DIR/kernel" 2>/dev/null | head -n 20
-        fi
-    
-        echo
-        echo "========== KERNEL PATCHES =========="
-        if [ -d "$GITHUB_WORKSPACE/kernel_patches/.git" ]; then
-            git -C "$GITHUB_WORKSPACE/kernel_patches" rev-parse HEAD
-            git -C "$GITHUB_WORKSPACE/kernel_patches" log -1 --format='%H%n%s'
-        fi
-    
-        echo
-        echo "========== SUSFS4KSU DIRECTORY =========="
-        find "$GITHUB_WORKSPACE" -maxdepth 4 -type d -name susfs4ksu -print
-        find "$GITHUB_WORKSPACE" -maxdepth 4 -type d -name kernel_patches -print
-    
-        echo
-        echo "========== REJECT FILES =========="
-        find "$GITHUB_WORKSPACE" -type f -name '*.rej' -print
-    
-        echo
-        echo "========== DEBUG FINISHED =========="
-    
     - name: Apply KSU Hooks
       shell: bash
       if: ${{ env.NEED_HOOKS == 'true' }}
@@ -2644,10 +2284,11 @@ runs:
         set -euo pipefail
         echo "::group::Collect Build stats"
         IMG="$COMMON_KERNEL_FOLDER/out/arch/arm64/boot/Image"
-
-        if [ ! -s "$IMG" ]; then
-            echo "::error::Freshly built kernel Image not found: $IMG"
-            exit 1
+        
+        if [ -f "$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image" ]; then
+          IMG="$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image"
+        elif [ -f "$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image" ]; then
+          IMG="$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image"
         fi
         
         if [ -f "$COMMON_KERNEL_FOLDER/build.log" ]; then
@@ -2701,10 +2342,11 @@ runs:
         echo "::group::Create kernel ZIP package"
         
         IMAGE_PATH="$COMMON_KERNEL_FOLDER/out/arch/arm64/boot/Image"
-
-        if [ ! -s "$IMAGE_PATH" ]; then
-            echo "::error::Freshly built kernel Image not found: $IMAGE_PATH"
-            exit 1
+        
+        if [ -f "$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image" ]; then
+          IMAGE_PATH="$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image"
+        elif [ -f "$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image" ]; then
+          IMAGE_PATH="$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image"
         fi
         
         if [ ! -f "$IMAGE_PATH" ]; then
@@ -2762,21 +2404,6 @@ runs:
         echo "   SHA256: $ZIP_SHA256"
         echo "::endgroup::"
 
-    - name: Download matching KernelSU Next Manager APK
-      id: download_manager_apk
-      shell: bash
-      if: ${{ inputs.ksu_type == 'KSUN' }}
-      run: |
-        set -euo pipefail
-        mkdir -p "$ARTIFACTS_FOLDER"
-        APK_PATH="$ARTIFACTS_FOLDER/$MANAGER_APK_NAME"
-        curl --fail --location --retry 4 --retry-delay 3 "$MANAGER_APK_URL" -o "$APK_PATH"
-        test -s "$APK_PATH"
-        unzip -t "$APK_PATH" >/dev/null
-        sha256sum "$APK_PATH"
-        echo "apk_name=$MANAGER_APK_NAME" >> "$GITHUB_OUTPUT"
-        echo "Manager APK downloaded: $APK_PATH"
-
     - name: Final Build Summary
       shell: bash
       run: |
@@ -2798,10 +2425,6 @@ runs:
           if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
             echo "KSUN Version: ${KSUVER:-unknown}"
             echo "KSUN commit SHA: ${KSU_SHA:-unknown}"
-            echo "KSUN UAPI: ${KSUN_UAPI_VERSION:-unknown}"
-            echo "Manager release: ${MANAGER_RELEASE_TAG:-unknown} (UAPI ${MANAGER_UAPI_VERSION:-unknown})"
-            echo "Manager APK: ${MANAGER_APK_NAME:-not downloaded}"
-            echo "SUSFS patch commit: ${PATCH_COMMIT_SHA:-unknown}"
           else
             echo "KSU Version: ${KSUVER:-unknown}"
             echo "KSU commit SHA: ${KSU_SHA:-unknown}"
@@ -2852,10 +2475,6 @@ runs:
           echo "| **Build Host** | ${{ env.BUILD_HOST }} |"
           if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
             echo "| **KSUN Version** | ${KSUVER:-unknown} |"
-            echo "| **KSUN UAPI** | ${KSUN_UAPI_VERSION:-unknown} |"
-            echo "| **Manager release** | ${MANAGER_RELEASE_TAG:-unknown} |"
-            echo "| **Manager APK** | ${MANAGER_APK_NAME:-not downloaded} |"
-            echo "| **SUSFS patch commit** | ${PATCH_COMMIT_SHA:-unknown} |"
           else
             echo "| **KSU Version** | ${KSUVER:-unknown} |"
           fi
@@ -2931,17 +2550,7 @@ runs:
       uses: actions/upload-artifact@v7
       with:
         name: ${{ env.ZIP_NAME }}
-        path: ${{ env.ARTIFACTS_FOLDER }}
-        archive: false
-        compression-level: 0
-        retention-days: 90
-
-    - name: Upload KernelSU Next Manager APK
-      if: success() && inputs.ksu_type == 'KSUN' && steps.download_manager_apk.conclusion == 'success'
-      uses: actions/upload-artifact@v7
-      with:
-        name: KernelSU-Next-Manager-${{ env.MANAGER_RELEASE_TAG }}-UAPI${{ env.MANAGER_UAPI_VERSION }}
-        path: ${{ env.ARTIFACTS_FOLDER }}/${{ env.MANAGER_APK_NAME }}
+        path: ${{ env.ARTIFACTS_FOLDER }}/${{ env.ZIP_NAME }}
         archive: false
         compression-level: 0
         retention-days: 90
