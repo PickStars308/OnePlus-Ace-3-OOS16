@@ -942,7 +942,18 @@ runs:
                 exit 1
             fi
         done
+
+        echo "========== init.c.rej =========="
+        if [ -f kernel/core/init.c.rej ]; then
+            cat kernel/core/init.c.rej
+        fi
         
+        echo "========== init.c current source =========="
+        sed -n '100,220p' kernel/core/init.c
+        
+        echo "========== init.c patch =========="
+        cat "$PATCH_DIR/fix_init.c.patch"
+
         echo "SUSFS v2.3.0 patch directory verified."
         echo "Patch directory: $PATCH_DIR"
 
