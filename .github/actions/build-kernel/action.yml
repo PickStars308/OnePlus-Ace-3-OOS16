@@ -1650,7 +1650,45 @@ runs:
     
         find "$GITHUB_WORKSPACE" -type d -name "KernelSU-Next" -print
         find "$GITHUB_WORKSPACE" -type d -name "kernel_patches" -print
-    
+        echo
+        echo "========================================="
+        echo "DEBUG: ACTUAL SOURCE COMMITS"
+        echo "========================================="
+        
+        KSUN_DIR="$(find "$GITHUB_WORKSPACE" -type d -name "KernelSU-Next" -print -quit)"
+        KERNEL_PATCHES_DIR="$GITHUB_WORKSPACE/kernel_patches"
+        SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu"
+        
+        echo "[KernelSU-Next]"
+        if [ -n "$KSUN_DIR" ] && [ -d "$KSUN_DIR/.git" ]; then
+            git -C "$KSUN_DIR" rev-parse HEAD
+            git -C "$KSUN_DIR" log -1 --format='%s'
+        else
+            echo "KernelSU-Next Git repository not found"
+        fi
+        
+        echo
+        echo "[kernel_patches]"
+        if [ -d "$KERNEL_PATCHES_DIR/.git" ]; then
+            git -C "$KERNEL_PATCHES_DIR" rev-parse HEAD
+            git -C "$KERNEL_PATCHES_DIR" log -1 --format='%s'
+        else
+            echo "kernel_patches Git repository not found"
+        fi
+        
+        echo
+        echo "[susfs4ksu]"
+        if [ -d "$SUSFS_DIR/.git" ]; then
+            git -C "$SUSFS_DIR" rev-parse HEAD
+            git -C "$SUSFS_DIR" log -1 --format='%s'
+        else
+            echo "susfs4ksu Git repository not found"
+        fi
+        
+        echo
+        echo "[KernelSU version setting]"
+        grep -nE 'KSU_VERSION=|KSUN_COMMIT=' "$GITHUB_WORKSPACE/.github/workflows/"*.yml
+
         echo "DEBUG FINISHED"
       
     
