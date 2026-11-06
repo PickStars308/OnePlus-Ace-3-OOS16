@@ -3,6 +3,29 @@ name: Build OnePlus Ace 3 - KernelSU Next + SUSFS
 
 on:
   workflow_dispatch:
+    inputs:
+      ksu_type:
+        description: "KernelSU variant"
+        required: true
+        type: choice
+        default: KSUN
+        options:
+          - KSUN
+          - KSU
+      ksu_channel:
+        description: "Source channel (release tag / dev branch / custom ref)"
+        required: true
+        type: choice
+        default: custom
+        options:
+          - release
+          - dev
+          - custom
+      ksu_ref:
+        description: "Release tag or commit/branch (custom defaults to KSUN 33355)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: write
