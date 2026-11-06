@@ -803,14 +803,59 @@ runs:
           while [ $attempt -le $max_attempts ]; do
               echo " Attempt $attempt/$max_attempts: High-speed fetch for $repo_name ($branch)"
               
-              if aria2c -x16 -s16 -j16 -k1M --retry-wait=2 --max-tries=5 -d "/dev/shm" -o "$archive_name" --allow-overwrite=true "${aria2_headers[@]}" $aria_log_flags "$download_url"; then
+              
+              # First attempt: aria2 high-speed download
+              download_ok=false
+              
+              if aria2c -x4 -s4 -j1 -k1M \
+                  --retry-wait=3 \
+                  --max-tries=3 \
+                  --connect-timeout=30 \
+                  -d "/dev/shm" \
+                  -o "$archive_name" \
+                  --allow-overwrite=true \
+                  "${aria2_headers[@]}" \
+                  "$download_url"; then
+                  download_ok=true
+              fi
+              
+              # Second attempt: GitLab Repository Archive API
+              if [ "$download_ok" = false ] && [[ "$url" == *"gitlab.com"* ]]; then
+                  echo "⚠️ aria2 failed, trying GitLab Archive API..."
+              
+                  rm -f "$shm_path"
+              
+                  api_url="https://gitlab.com/api/v4/projects/simonpunk%2Fsusfs4ksu/repository/archive.tar.gz?sha=${branch}"
+              
+                  if curl -fL \
+                      --retry 3 \
+                      --retry-delay 5 \
+                      --connect-timeout 30 \
+                      --max-time 600 \
+                      -A "Mozilla/5.0" \
+                      -o "$shm_path" \
+                      "$api_url"; then
+                      download_ok=true
+                  fi
+              fi
+              
+              # Verify and extract archive
+              if [ "$download_ok" = true ] && [ -s "$shm_path" ]; then
                   mkdir -p "$repo_name"
-                  if tar -I "pigz -p $nproc -b 256" -x --record-size=1M -f "$shm_path" -C "$repo_name" --strip-components=1 --no-same-owner; then
+              
+                  if tar -I "pigz -p $nproc -b 256" \
+                      -x --record-size=1M \
+                      -f "$shm_path" \
+                      -C "$repo_name" \
+                      --strip-components=1 \
+                      --no-same-owner; then
+              
                       echo "✅ Success: $repo_name synced"
                       rm -f "$shm_path"
                       return 0
                   fi
               fi
+
               
               echo "⚠️ Attempt $attempt failed, clearing RAM and retrying..."
               rm -rf "$repo_name" "$shm_path" 2>/dev/null
