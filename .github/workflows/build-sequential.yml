@@ -641,7 +641,7 @@ jobs:
           ksu_type: KSUN
           ksu_branch_or_hash: "4c706b5938665866ebe16944a481a7b91e3396af"
           
-          susfs_commit_hash_or_branch: "bd27d727b27fc90bfbb6eaccd28060a53c473266"
+          susfs_commit_hash_or_branch: "gki-android13-5.15"
 
           # 编译优化
           optimize_level: O2
