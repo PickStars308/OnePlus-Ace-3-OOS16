@@ -900,13 +900,24 @@ runs:
         }
         
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
-        
+
         echo "Pinning kernel_patches to SUSFS v2.2.0..."
         git -C kernel_patches fetch --no-tags --depth=1 origin cd63f371d91fb7fc32014c75728fbb9b686d9ae9
         git -C kernel_patches checkout --detach FETCH_HEAD
         
         echo "========== PINNED PATCH VERSION =========="
         git -C kernel_patches log -1 --oneline
+        
+        echo "========== CHECK SUSFS v2.2.0 PATCH FILES =========="
+        
+        PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.2.0"
+        
+        if [ ! -d "$PATCH_DIR" ]; then
+          echo "::error::SUSFS v2.2.0 patch directory missing"
+          exit 1
+        fi
+        
+        find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' -printf '%f\n' | sort
         
         if [ "${{ env.OP_SUSFS }}" = true ]; then
           echo "Using SUSFS branch/commit: $SUSFS_BRANCH"
