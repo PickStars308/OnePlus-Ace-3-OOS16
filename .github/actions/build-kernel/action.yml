@@ -1196,8 +1196,7 @@ runs:
               echo "========== VERIFY REQUIRED FIX PATCHES =========="
               
               while IFS= read -r rej; do
-                file="${rej#./kernel/}"
-                file="${file%.rej}"
+                file="$(basename "$rej" .rej)"
                 expected="$PATCH_DIR/fix_$file.patch"
               
                 if [ ! -f "$expected" ]; then
