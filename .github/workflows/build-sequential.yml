@@ -637,11 +637,13 @@ jobs:
         with:
           op_config_json: ${{ steps.config.outputs.json }}
 
-          # KernelSU Next
+          # KernelSU Next：留空时跟踪官方 dev 分支（当前 UAPI 6）
+          # 如需稳定版，可填写 v3.4.2；也可填写经过验证的完整 commit SHA
           ksu_type: KSUN
           ksu_branch_or_hash: ""
 
-          # 自动选择 Android 13 / Kernel 5.15 对应 SUSFS 分支；补丁集由 Action 按 KSU SHA 自动匹配
+          # 自动选择 Android 13 / Kernel 5.15 对应 SUSFS 分支
+          # SUSFS 版本由分支实际内容决定；KSUN patch resolver 会按源码 SHA 匹配补丁
           susfs_commit_hash_or_branch: ""
 
           # 编译优化
