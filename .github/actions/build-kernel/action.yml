@@ -1690,7 +1690,43 @@ runs:
         grep -nE 'KSU_VERSION=|KSUN_COMMIT=' "$GITHUB_WORKSPACE/.github/workflows/"*.yml
 
         echo "DEBUG FINISHED"
-      
+
+    - name: Debug KernelSU and SUSFS Versions
+      if: always()
+      shell: bash
+      run: |
+        set +e
+    
+        echo "========== WORKFLOW VERSION SETTINGS =========="
+        grep -R -nE 'KSU_VERSION|KSUN_COMMIT|SUSFS_COMMIT|PATCH_REF' "$GITHUB_WORKSPACE/.github/workflows"
+    
+        echo
+        echo "========== KERNELSU SOURCE =========="
+        KSUN_DIR="$(find "$GITHUB_WORKSPACE" -type d -name KernelSU-Next -print -quit)"
+        if [ -n "$KSUN_DIR" ]; then
+            git -C "$KSUN_DIR" rev-parse HEAD
+            git -C "$KSUN_DIR" log -1 --format='%H%n%s'
+            grep -R -n 'KERNEL_SU_UAPI_VERSION' "$KSUN_DIR/kernel" "$KSUN_DIR/kernel" 2>/dev/null | head -n 20
+        fi
+    
+        echo
+        echo "========== KERNEL PATCHES =========="
+        if [ -d "$GITHUB_WORKSPACE/kernel_patches/.git" ]; then
+            git -C "$GITHUB_WORKSPACE/kernel_patches" rev-parse HEAD
+            git -C "$GITHUB_WORKSPACE/kernel_patches" log -1 --format='%H%n%s'
+        fi
+    
+        echo
+        echo "========== SUSFS4KSU DIRECTORY =========="
+        find "$GITHUB_WORKSPACE" -maxdepth 4 -type d -name susfs4ksu -print
+        find "$GITHUB_WORKSPACE" -maxdepth 4 -type d -name kernel_patches -print
+    
+        echo
+        echo "========== REJECT FILES =========="
+        find "$GITHUB_WORKSPACE" -type f -name '*.rej' -print
+    
+        echo
+        echo "========== DEBUG FINISHED =========="
     
     - name: Apply KSU Hooks
       shell: bash
