@@ -2526,10 +2526,10 @@ runs:
             src = src.replace(previous, current)
         src = src.replace(
             '  # Check 2: kernel version Image must be >= Device',
-            '  # The source release may omit -androidNN; numeric version is still checked.\\n'
-            '  if [ -z "$new_abranch" ]; then\\n'
-            '    ui_print "  -> Image has no Android branch suffix."\\n'
-            '  fi\\n'
+            '  # The source release may omit -androidNN; numeric version is still checked.\n'
+            '  if [ -z "$new_abranch" ]; then\n'
+            '    ui_print "  -> Image has no Android branch suffix."\n'
+            '  fi\n'
             '  # Check 2: kernel version Image must be >= Device',
             1,
         )
