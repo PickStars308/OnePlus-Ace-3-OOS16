@@ -899,11 +899,25 @@ runs:
           return 1
         }
         
-        retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
+        retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "0"
 
-        echo "Pinning kernel_patches to SUSFS v2.2.0..."
-        git -C kernel_patches fetch --no-tags --depth=1 origin cd63f371d91fb7fc32014c75728fbb9b686d9ae9
-        git -C kernel_patches checkout --detach FETCH_HEAD
+        echo "Pinning kernel_patches to SUSFS v2.3.0 high-33341..."
+        PATCH_REF="ffa6aa5a0a"
+        
+        git -C kernel_patches checkout --detach "$PATCH_REF"
+        
+        echo "========== PINNED PATCH VERSION =========="
+        git -C kernel_patches log -1 --format='%H %s'
+        
+        PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0/high-33341"
+        
+        echo "========== VERIFY KSUN HIGH-33341 PATCHES =========="
+        if [ ! -d "$PATCH_DIR" ]; then
+          echo "::error::Missing SUSFS high-33341 patch directory: $PATCH_DIR"
+          exit 1
+        fi
+        
+        find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' -printf '%f\n' | sort
         
         echo "========== PINNED PATCH VERSION =========="
         git -C kernel_patches log -1 --oneline
@@ -960,21 +974,19 @@ runs:
         
         # 固定 KernelSU-Next 版本，避免 next 分支更新导致 SUSFS 补丁不兼容
         # 固定 KernelSU Next 官方 v3.4.2
-        KSUN_TAG="v3.4.2"
-        
-        echo "Pinning KernelSU Next to ${KSUN_TAG}..."
+        KSUN_COMMIT="4c706b5938665866ebe16944a481a7b91e3396af"
+
+        echo "Pinning KernelSU Next to ${KSUN_COMMIT}..."
         
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" fetch \
-          --force --no-tags origin \
-          "refs/tags/${KSUN_TAG}:refs/tags/${KSUN_TAG}"
+          --force --no-tags origin "$KSUN_COMMIT"
         
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" checkout --detach \
-          "refs/tags/${KSUN_TAG}"
+          "$KSUN_COMMIT"
         
         echo "========== KernelSU-Next VERSION =========="
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" log -1 --format='%H %s'
         
-        # 初始化固定版本对应的子模块
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" submodule update --init --recursive
 
         echo "========== CHECK KERNELSU UAPI =========="
@@ -989,15 +1001,8 @@ runs:
         
         cd "$KERNEL_PLATFORM_FOLDER/KernelSU-Next/kernel"
         
-        COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
+        KSU_VERSION=33355
         
-        if [ $COMMITS_COUNT -lt 2684 ]; then
-          BASE_VERSION=10200
-        else
-          BASE_VERSION=30000
-        fi
-        
-        KSU_VERSION=$(expr $COMMITS_COUNT "+" $BASE_VERSION)
         sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
         
         if [ -f ksu.c ]; then
@@ -1186,39 +1191,53 @@ runs:
               patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
             fi
             ;;
-          "v2.2.0")
+          "v2.3.0")
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
               cd "$KSUN_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-              
-              PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version"
-              
-              echo "========== VERIFY REQUIRED FIX PATCHES =========="
-              
-              while IFS= read -r rej; do
-                file="$(basename "$rej" .rej)"
-                expected="$PATCH_DIR/fix_$file.patch"
-              
-                if [ ! -f "$expected" ]; then
-                  echo "::error::Missing required fix patch: $expected"
-                  exit 1
-                fi
-              
-                echo "Found: fix_$file.patch"
-              done < <(find ./kernel -maxdepth 2 -type f -name '*.rej' | sort)
-              
-              echo "========== APPLY FIX PATCHES =========="
-              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
-                echo "Patching file: $file with fix_$file.patch"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
+          
+              echo "========== APPLY SUSFS BASE PATCH =========="
+          
+              BASE_PATCH="$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+          
+              if [ ! -f "$BASE_PATCH" ]; then
+                echo "::error::Missing SUSFS base patch: $BASE_PATCH"
+                exit 1
+              fi
+          
+              patch -p1 --forward --fuzz=3 < "$BASE_PATCH"
+          
+              echo "========== APPLY KSUN 33355 HIGH-33341 PATCHES =========="
+          
+              PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0/high-33341"
+          
+              if [ ! -d "$PATCH_DIR" ]; then
+                echo "::error::Missing KSUN high-33341 patch directory"
+                exit 1
+              fi
+          
+              mapfile -t FIX_PATCHES < <(
+                find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' | sort
+              )
+          
+              if [ "${#FIX_PATCHES[@]}" -eq 0 ]; then
+                echo "::error::No SUSFS fix patches found"
+                exit 1
+              fi
+          
+              echo "Found ${#FIX_PATCHES[@]} fix patches"
+          
+              for patch_file in "${FIX_PATCHES[@]}"; do
+                echo "Applying: $(basename "$patch_file")"
+                patch -p1 --forward --fuzz=3 < "$patch_file"
               done
-              echo "Patching Hook Mode!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
-              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
+          
+              echo "========== SUSFS KSUN PATCHES APPLIED =========="
+          
             else
               cd "$KSU_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+          
+              patch -p1 --forward --fuzz=3 \
+                < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
             fi
             ;;
           *)
