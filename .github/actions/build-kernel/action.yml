@@ -904,27 +904,31 @@ runs:
         echo "Pinning kernel_patches to SUSFS v2.3.0 high-33341..."
         PATCH_REF="ffa6aa5a0a"
 
-        echo "Fetching kernel_patches main history..."
-        git -C kernel_patches fetch --no-tags origin main
+        echo "Fetching all remote branches from kernel_patches..."
+        git -C kernel_patches fetch --no-tags origin \
+            '+refs/heads/*:refs/remotes/origin/*'
         
-        echo "Verifying target commit: ${PATCH_REF}"
+        echo "Checking target commit: ${PATCH_REF}"
+        
         if ! git -C kernel_patches cat-file -e "${PATCH_REF}^{commit}" 2>/dev/null; then
-            echo "❌ Target commit ${PATCH_REF} is not present locally."
-            echo "Repository history:"
-            git -C kernel_patches log --oneline --all -10
+            echo "❌ Target commit ${PATCH_REF} is not available in fetched branches."
+            echo "========== REMOTE BRANCHES =========="
+            git -C kernel_patches branch -r
+        
+            echo "========== RECENT COMMITS =========="
+            git -C kernel_patches log --all --oneline -30
+        
             exit 1
         fi
         
         PATCH_COMMIT="$(git -C kernel_patches rev-parse "${PATCH_REF}^{commit}")"
         
-        echo "Switching to kernel_patches commit: ${PATCH_COMMIT}"
+        echo "✅ Target commit found: ${PATCH_COMMIT}"
+        
         git -C kernel_patches switch --detach "$PATCH_COMMIT"
         
         echo "========== PINNED PATCH VERSION =========="
         git -C kernel_patches log -1 --format='%H%n%s'
-        
-        echo "========== PINNED PATCH VERSION =========="
-        git -C kernel_patches log -1 --format='%H %s'
         
         PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0/high-33341"
         
