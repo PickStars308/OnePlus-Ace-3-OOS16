@@ -1197,6 +1197,7 @@ runs:
               
               while IFS= read -r rej; do
                 file="${rej#./kernel/}"
+                file="${file%.rej}"
                 expected="$PATCH_DIR/fix_$file.patch"
               
                 if [ ! -f "$expected" ]; then
