@@ -1371,6 +1371,16 @@ runs:
         
         echo "::endgroup::"
 
+    - name: Upload SUSFS rejected patches
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: susfs-rejected-patches
+        path: |
+          **/*.rej
+        if-no-files-found: warn
+        retention-days: 7
+          
     - name: Add BBG
       if: ${{ env.OP_BBG == 'true' }}
       shell: bash
