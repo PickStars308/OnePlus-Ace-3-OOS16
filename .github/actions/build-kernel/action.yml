@@ -1067,11 +1067,11 @@ runs:
         echo "COMMITS_COUNT=$COMMITS_COUNT"
         echo "KSU_VERSION=$KSU_VERSION"
         
-        if [ "$KSU_VERSION" -ne 33457 ]; then
-            echo "::error::Expected KSUN 33457 for the pinned SUSFS patch set, got $KSU_VERSION"
+        if [ "$KSU_VERSION" -ne 33355 ]; then
+            echo "::error::Expected KSUN 33355, got $KSU_VERSION"
             exit 1
         fi
-        
+                
         sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
         
         if [ -f ksu.c ]; then
@@ -2616,11 +2616,10 @@ runs:
         set -euo pipefail
         echo "::group::Collect Build stats"
         IMG="$COMMON_KERNEL_FOLDER/out/arch/arm64/boot/Image"
-        
-        if [ -f "$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image" ]; then
-          IMG="$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image"
-        elif [ -f "$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image" ]; then
-          IMG="$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image"
+
+        if [ ! -s "$IMG" ]; then
+            echo "::error::Freshly built kernel Image not found: $IMG"
+            exit 1
         fi
         
         if [ -f "$COMMON_KERNEL_FOLDER/build.log" ]; then
@@ -2674,11 +2673,10 @@ runs:
         echo "::group::Create kernel ZIP package"
         
         IMAGE_PATH="$COMMON_KERNEL_FOLDER/out/arch/arm64/boot/Image"
-        
-        if [ -f "$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image" ]; then
-          IMAGE_PATH="$KERNEL_PLATFORM_FOLDER/out/$OP_ANDROID_VERSION-$OP_KERNEL_VERSION/dist/Image"
-        elif [ -f "$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image" ]; then
-          IMAGE_PATH="$KERNEL_PLATFORM_FOLDER/bazel-bin/common/kernel_aarch64/Image"
+
+        if [ ! -s "$IMAGE_PATH" ]; then
+            echo "::error::Freshly built kernel Image not found: $IMAGE_PATH"
+            exit 1
         fi
         
         if [ ! -f "$IMAGE_PATH" ]; then
