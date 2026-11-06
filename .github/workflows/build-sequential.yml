@@ -639,11 +639,10 @@ jobs:
 
           # KernelSU Next
           ksu_type: KSUN
-          ksu_branch_or_hash: "b2c1ad00b755afe0db74d889b67a137f56e71fcc"
+          ksu_branch_or_hash: ""
 
-          # 自动选择 Android 13 / Kernel 5.15 对应 SUSFS 分支
-          # 固定 SUSFS v2.2.0，避免自动拉取 v2.3.0
-          susfs_commit_hash_or_branch: "bd27d727b27fc90bfbb6eaccd28060a53c473266"
+          # 自动选择 Android 13 / Kernel 5.15 对应 SUSFS 分支；补丁集由 Action 按 KSU SHA 自动匹配
+          susfs_commit_hash_or_branch: ""
 
           # 编译优化
           optimize_level: O2
