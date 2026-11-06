@@ -903,8 +903,12 @@ runs:
 
         echo "Pinning kernel_patches to SUSFS v2.3.0 high-33341..."
         PATCH_REF="ffa6aa5a0a"
+
+        echo "Fetching exact kernel_patches commit: $PATCH_REF"
         
-        git -C kernel_patches checkout --detach "$PATCH_REF"
+        git -C kernel_patches fetch --no-tags origin "$PATCH_REF"
+        
+        git -C kernel_patches checkout --detach FETCH_HEAD
         
         echo "========== PINNED PATCH VERSION =========="
         git -C kernel_patches log -1 --format='%H %s'
