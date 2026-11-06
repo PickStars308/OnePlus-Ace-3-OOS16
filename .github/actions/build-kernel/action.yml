@@ -580,6 +580,14 @@ runs:
         echo "✅ Detected Clang: $CLANG_VERSION"
         echo "::endgroup::"
 
+    - name: Debug SUSFS patch rejects
+      if: always()
+      shell: bash
+      run: |
+        KSUN_FOLDER="$GITHUB_WORKSPACE/KernelSU-Next"
+        find "$GITHUB_WORKSPACE" -type f -name '*.rej' -print
+
+    
     - name: Check or Detect Rust & bindgen
       shell: bash
       if: ${{ env.OP_RUST_BUILD == 'true' }}
@@ -1150,6 +1158,30 @@ runs:
         echo "✅ KernelSU added (commit: ${KSU_COMMIT_SHA:0:8})"
         echo "::endgroup::"
 
+        echo "========================================="
+        echo "DEBUG: KernelSU / SUSFS source versions"
+        echo "========================================="
+        
+        echo "[KernelSU-Next]"
+        git -C "$KSUN_FOLDER" rev-parse HEAD
+        git -C "$KSUN_FOLDER" log -1 --format='%H%n%s'
+        
+        echo "[SUSFS]"
+        git -C "$SUSFS_FOLDER" rev-parse HEAD
+        git -C "$SUSFS_FOLDER" log -1 --format='%H%n%s'
+        
+        echo "[kernel_patches]"
+        git -C "$KERNEL_PATCHES_FOLDER" rev-parse HEAD
+        git -C "$KERNEL_PATCHES_FOLDER" log -1 --format='%H%n%s'
+        
+        echo "[KSU version]"
+        echo "${KSU_VERSION:-NOT_SET}"
+        
+        echo "[Patch files]"
+        find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' -printf '%f\n' | sort
+        
+        echo "========================================="
+
     - name: Apply SUSFS Patches
       shell: bash
       if: ${{ env.OP_SUSFS == 'true' }}
@@ -1361,6 +1393,66 @@ runs:
             patch -p1 --forward --fuzz=3 < "$PATCH_DIR/ksu_toolkit.patch"
         
             echo "SUSFS v2.3.0 patches applied successfully."
+
+
+            echo "========================================="
+            echo "DEBUG: SUSFS PATCH REJECT FILES"
+            echo "========================================="
+            
+            echo "[1] All reject files:"
+            
+            find "$KSUN_FOLDER/kernel" -type f -name '*.rej' -print || true
+            
+            echo
+            echo "[2] init.c reject:"
+            
+            if [ -f "$KSUN_FOLDER/kernel/core/init.c.rej" ]; then
+                cat "$KSUN_FOLDER/kernel/core/init.c.rej"
+            else
+                echo "No init.c.rej"
+            fi
+            
+            echo
+            echo "[3] sucompat.c reject:"
+            
+            if [ -f "$KSUN_FOLDER/kernel/feature/sucompat.c.rej" ]; then
+                cat "$KSUN_FOLDER/kernel/feature/sucompat.c.rej"
+            else
+                echo "No sucompat.c.rej"
+            fi
+            
+            echo
+            echo "[4] setuid_hook.c reject:"
+            
+            if [ -f "$KSUN_FOLDER/kernel/hook/setuid_hook.c.rej" ]; then
+                cat "$KSUN_FOLDER/kernel/hook/setuid_hook.c.rej"
+            else
+                echo "No setuid_hook.c.rej"
+            fi
+            
+            echo
+            echo "[5] dispatch.c reject:"
+            
+            if [ -f "$KSUN_FOLDER/kernel/supercall/dispatch.c.rej" ]; then
+                cat "$KSUN_FOLDER/kernel/supercall/dispatch.c.rej"
+            else
+                echo "No dispatch.c.rej"
+            fi
+            
+            echo
+            echo "[6] supercall.c reject:"
+            
+            if [ -f "$KSUN_FOLDER/kernel/supercall/supercall.c.rej" ]; then
+                cat "$KSUN_FOLDER/kernel/supercall/supercall.c.rej"
+            else
+                echo "No supercall.c.rej"
+            fi
+            
+            echo
+            echo "========================================="
+            echo "DEBUG OUTPUT FINISHED"
+            echo "========================================="
+
             ;;
         esac
         
