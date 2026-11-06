@@ -364,7 +364,7 @@ runs:
         KERNEL_PATCHES_DIR="$GITHUB_WORKSPACE/kernel_patches"
         SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu"
         KSU_DIR="$KERNEL_PLATFORM_DIR/KernelSU"
-        KSUN_DIR="$KERNEL_PLATFORM_DIR/KernelSU-Next"
+        KSUN_DIR="$KERNEL_PLATFORM_DIR/KernelSU"
         mkdir -p "$ARTIFACTS_DIR"
         mkdir -p "$DEBUG_ARTIFACTS_DIR"
         
@@ -2433,7 +2433,7 @@ runs:
           
           if [ "$KSU_SHA" != "unknown" ]; then
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              echo "| **KSUN Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/KernelSU-Next/KernelSU-Next/commit/$KSU_SHA) |"
+              echo "| **KSUN Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/$KSU_SHA) |"
             else
               echo "| **KSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/tiann/KernelSU/commit/$KSU_SHA) |"
             fi
