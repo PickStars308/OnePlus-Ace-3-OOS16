@@ -1182,10 +1182,34 @@ runs:
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
               cd "$KSUN_FOLDER"
               patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-              for file in $(find ./kernel -maxdepth 2 -name "*.rej" -exec basename {} .rej \;); do
-                echo "Patching file: $file with fix_$file.patch"
-                patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/fix_$file.patch"
-              done
+              FIX_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version"
+
+              echo "Checking SUSFS rejected patches..."
+              
+              while IFS= read -r -d '' rej; do
+                  file="$(basename "$rej" .rej)"
+                  fix="$FIX_DIR/fix_$file.patch"
+              
+                  if [ ! -f "$fix" ]; then
+                      echo "::error::Missing fix patch for $file"
+                      echo "Rejected file: $rej"
+                      exit 1
+                  fi
+              
+                  if ! patch --dry-run -p1 --forward < "$fix"; then
+                      echo "::error::Fix patch cannot be applied: $fix"
+                      exit 1
+                  fi
+              
+                  patch -p1 --forward < "$fix"
+                  rm -f "$rej"
+              
+              done < <(find ./kernel -type f -name "*.rej" -print0)
+              
+              if find ./kernel -type f -name "*.rej" -print -quit | grep -q .; then
+                  echo "::error::Unresolved SUSFS patch rejects"
+                  exit 1
+              fi
               echo "Patching Hook Mode!"
               patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
               echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
