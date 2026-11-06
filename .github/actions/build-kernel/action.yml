@@ -2269,7 +2269,13 @@ runs:
         fi
         test -s "$KDIR/out/Module.symvers" || { echo "::error::Missing kernel Module.symvers after modules build"; exit 1; }
         test -s "$KDIR/out/scripts/module.lds" || { echo "::error::Missing kernel scripts/module.lds after modules build"; exit 1; }
-        make -C "$KDIR" O="$KDIR/out" M="$MOD_DIR" modules -j"$(nproc)"
+        # Upstream UAPI6 SUSFS guard deliberately references private, non-exported
+        # kernel symbols. Its custom susfs_insmod loader resolves them at load time.
+        # Permit these known unresolved references at modpost; never claim that
+        # the resulting .ko is directly insmod-loadable.
+        make -C "$KDIR" O="$KDIR/out" M="$MOD_DIR" KBUILD_MODPOST_WARN=1 modules -j"$(nproc)"
+        echo "WARNING: This .ko requires the upstream SUSFS symbol-resolving loader."
+        echo "WARNING: Do not load it with plain insmod or flash it as a boot image."
         test -s "$MOD_DIR/susfs_guard_lkm.ko"
         mkdir -p "$ARTIFACTS_FOLDER/susfs-lkm"
         cp "$MOD_DIR/susfs_guard_lkm.ko" "$ARTIFACTS_FOLDER/susfs-lkm/"
