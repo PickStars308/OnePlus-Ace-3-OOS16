@@ -639,7 +639,7 @@ jobs:
 
           # KernelSU Next
           ksu_type: KSUN
-          ksu_branch_or_hash: ""
+          ksu_branch_or_hash: "4c706b5938665866ebe16944a481a7b91e3396af"
 
           # 自动选择 Android 13 / Kernel 5.15 对应 SUSFS 分支
           # 固定 SUSFS v2.2.0，避免自动拉取 v2.3.0
