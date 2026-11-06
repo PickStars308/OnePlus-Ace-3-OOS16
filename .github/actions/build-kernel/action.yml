@@ -999,18 +999,6 @@ runs:
             "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "$KSU_INPUT"
         fi
         
-        # 固定 KernelSU-Next 版本，避免 next 分支更新导致 SUSFS 补丁不兼容
-        # 固定 KernelSU Next 官方 v3.4.2
-        KSUN_COMMIT="4c706b5938665866ebe16944a481a7b91e3396af"
-
-        echo "Pinning KernelSU Next to ${KSUN_COMMIT}..."
-        
-        git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" fetch \
-          --force --no-tags origin "$KSUN_COMMIT"
-        
-        git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" checkout --detach \
-          "$KSUN_COMMIT"
-        
         echo "========== KernelSU-Next VERSION =========="
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" log -1 --format='%H %s'
         
@@ -1064,7 +1052,25 @@ runs:
         
         cd "$KERNEL_PLATFORM_FOLDER/KernelSU-Next/kernel"
         
-        KSU_VERSION=33355
+        COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
+
+        if [ "$COMMITS_COUNT" -lt 2684 ]; then
+            BASE_VERSION=10200
+        else
+            BASE_VERSION=30000
+        fi
+        
+        KSU_VERSION=$((COMMITS_COUNT + BASE_VERSION))
+        
+        echo "========== KSUN SOURCE VERSION =========="
+        git log -1 --format='%H %s'
+        echo "COMMITS_COUNT=$COMMITS_COUNT"
+        echo "KSU_VERSION=$KSU_VERSION"
+        
+        if [ "$KSU_VERSION" -ne 33457 ]; then
+            echo "::error::Expected KSUN 33457 for the pinned SUSFS patch set, got $KSU_VERSION"
+            exit 1
+        fi
         
         sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" Makefile
         
