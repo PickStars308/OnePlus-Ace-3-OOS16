@@ -902,7 +902,7 @@ runs:
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
         
         echo "Pinning kernel_patches to SUSFS v2.2.0..."
-        git -C kernel_patches fetch --depth=1 origin cd63f371d9
+        git -C kernel_patches fetch --no-tags --depth=1 origin cd63f371d91fb7fc32014c75728fbb9b686d9ae9
         git -C kernel_patches checkout --detach FETCH_HEAD
         
         echo "========== PINNED PATCH VERSION =========="
