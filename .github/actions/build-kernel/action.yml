@@ -1025,6 +1025,32 @@ runs:
 
         cd ..
 
+        # The upstream setup.sh normally performs this integration. Cloning
+        # KernelSU-Next and setting CONFIG_KSU=y alone does NOT build KernelSU.
+        # Link its source into the kernel driver's Kbuild/Kconfig hierarchy.
+        DRIVERS_DIR="$COMMON_KERNEL_FOLDER/drivers"
+        test -s "$DRIVERS_DIR/Makefile"
+        test -s "$DRIVERS_DIR/Kconfig"
+        test -s "$KSUN_DIR/kernel/Kbuild"
+        test -s "$KSUN_DIR/kernel/Kconfig"
+
+        if [ -e "$DRIVERS_DIR/kernelsu" ] || [ -L "$DRIVERS_DIR/kernelsu" ]; then
+          echo "::error::drivers/kernelsu already exists; refusing to overwrite a different integration."
+          exit 1
+        fi
+        ln -s "$KSUN_DIR/kernel" "$DRIVERS_DIR/kernelsu"
+        grep -Fqx 'obj-$(CONFIG_KSU) += kernelsu/' "$DRIVERS_DIR/Makefile" || \
+          printf '\\nobj-$(CONFIG_KSU) += kernelsu/\\n' >> "$DRIVERS_DIR/Makefile"
+        if ! grep -Fqx 'source "drivers/kernelsu/Kconfig"' "$DRIVERS_DIR/Kconfig"; then
+          # Same insertion point as KernelSU-Next's official setup.sh.
+          if ! grep -q '^endmenu' "$DRIVERS_DIR/Kconfig"; then
+            echo "::error::Cannot locate drivers/Kconfig endmenu to register KernelSU."
+            exit 1
+          fi
+          sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' "$DRIVERS_DIR/Kconfig"
+        fi
+        echo "KernelSU-Next linked into drivers Kbuild/Kconfig."
+
         echo "Add KSUN Configuration Settings"
 
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
@@ -2161,6 +2187,19 @@ runs:
         
         
         make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" O="$OUT" olddefconfig
+
+        if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+          if ! grep -qx 'CONFIG_KSU=y' "$OUT/.config"; then
+            echo "::error::KernelSU is not enabled in the resolved .config; refusing to build a non-root Image."
+            grep -E '^CONFIG_KSU=|^# CONFIG_KSU is not set|^CONFIG_KPROBES=|^CONFIG_EXT4_FS=' "$OUT/.config" || true
+            exit 1
+          fi
+          test -L "$COMMON_KERNEL_FOLDER/drivers/kernelsu" || {
+            echo "::error::KernelSU driver symlink missing"
+            exit 1
+          }
+          echo "Confirmed CONFIG_KSU=y and drivers/kernelsu integration."
+        fi
         
         KCFLAGS="$KCFLAGS -Wno-error -pipe ${KCFLAGS_EXTRA}"
         KCPPFLAGS="$KCPPFLAGS -DCONFIG_OPTIMIZE_INLINING"
@@ -2229,6 +2268,17 @@ runs:
           exit 1
         fi
         
+        if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+          KSU_INIT_OBJ="$COMMON_KERNEL_FOLDER/out/drivers/kernelsu/core/init.o"
+          KSU_BUILTIN_ARCHIVE="$COMMON_KERNEL_FOLDER/out/drivers/kernelsu/built-in.a"
+          if [ ! -s "$KSU_INIT_OBJ" ] || [ ! -s "$KSU_BUILTIN_ARCHIVE" ]; then
+            echo "::error::KernelSU source was not compiled into this kernel Image."
+            ls -lah "$COMMON_KERNEL_FOLDER/out/drivers/kernelsu/" 2>/dev/null || true
+            exit 1
+          fi
+          echo "Verified KernelSU-Next built-in objects: $KSU_INIT_OBJ"
+        fi
+
         IMG_SIZE=$(stat -c%s "$IMG")
         
         echo "============================================"
