@@ -642,7 +642,8 @@ jobs:
           ksu_branch_or_hash: ""
 
           # 自动选择 Android 13 / Kernel 5.15 对应 SUSFS 分支
-          susfs_commit_hash_or_branch: ""
+          # 固定 SUSFS v2.2.0，避免自动拉取 v2.3.0
+          susfs_commit_hash_or_branch: "ccb1918684b27644d17a6c842f57b60ae5966025"
 
           # 编译优化
           optimize_level: O2
