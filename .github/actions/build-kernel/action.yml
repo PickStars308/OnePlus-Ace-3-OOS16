@@ -979,15 +979,19 @@ runs:
         echo "KSUN_TAG=$KSUN_TAG" >> "$GITHUB_ENV"
 
         echo "========== KSUN CURRENT =========="
-        git -C KernelSU-Next log -1 --format=fuller
-        git -C KernelSU-Next describe --always --tags
+        git -C "$KSUN_FOLDER" log -1 --format=fuller
+        git -C "$KSUN_FOLDER" describe --always --tags
+        
+        echo "========== PATCH REPOSITORY =========="
+        echo "Path: $KERNEL_PATCHES_FOLDER"
+        ls -ld "$KERNEL_PATCHES_FOLDER"
         
         echo "========== PATCH 33405 =========="
-        git -C kernel_patches show -s --format=fuller \
+        git -C "$KERNEL_PATCHES_FOLDER" show -s --format=fuller \
           c78291aeb0dca025f21e6b197e0aa4fde42e065d
         
         echo "========== PATCH FILES =========="
-        git -C kernel_patches ls-tree -r --name-only \
+        git -C "$KERNEL_PATCHES_FOLDER" ls-tree -r --name-only \
           c78291aeb0dca025f21e6b197e0aa4fde42e065d \
           next/susfs_fix_patches/v2.3.0
   
