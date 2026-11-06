@@ -938,12 +938,28 @@ runs:
         cd "$KERNEL_PLATFORM_FOLDER"
         echo "Adding KernelSU Next..."
         KSU_INPUT="${{ inputs.ksu_branch_or_hash }}"
+
         if [ -z "$KSU_INPUT" ]; then
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+          curl --fail --location --proto '=https' -LSs \
+            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
         else
-          curl --fail --location --proto '=https' -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "$KSU_INPUT"
+          curl --fail --location --proto '=https' -LSs \
+            "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s "$KSU_INPUT"
         fi
+        
+        # 固定 KernelSU-Next 版本，避免 next 分支更新导致 SUSFS 补丁不兼容
+        KSUN_COMMIT="234f6e040fcbca18b16d2398e1aa225712ec99ad"
+        
+        git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" fetch --no-tags origin "$KSUN_COMMIT"
+        git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" checkout --detach "$KSUN_COMMIT"
+        
+        # 初始化固定版本对应的子模块
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" submodule update --init --recursive
+        
+        # 输出版本，方便检查 Actions 日志
+        echo "========== KernelSU-Next VERSION =========="
+        git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" log -1 --format='%H %s'
+        
         cd "$KERNEL_PLATFORM_FOLDER/KernelSU-Next/kernel"
         
         COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
