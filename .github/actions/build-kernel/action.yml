@@ -901,8 +901,8 @@ runs:
         
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
         
-        echo "Pinning kernel_patches to SUSFS v2.2.0..."
-        git -C kernel_patches fetch --no-tags --depth=1 origin cd63f371d91fb7fc32014c75728fbb9b686d9ae9
+        echo "Pinning kernel_patches to the v2.3.0 high-range fix set..."
+        git -C kernel_patches fetch --no-tags --depth=1 origin a799fa7a3e81013d4874932b12e76070f46c46b4
         git -C kernel_patches checkout --detach FETCH_HEAD
         
         echo "========== PINNED PATCH VERSION =========="
@@ -929,12 +929,12 @@ runs:
         sed -i 's/protected_modules = \[.*\]/protected_modules = []/' common/modules.bzl || true
         echo "::endgroup::"
 
-    - name: Add KernelSU Next (SUSFS v2.2.0 compatible)
+    - name: Add KernelSU Next (SUSFS v2.3.0 / KernelSU-Next 33355)
       shell: bash
       if: ${{ inputs.ksu_type == 'KSUN' }}
       run: |
         set -euo pipefail
-        echo "::group::Add KernelSU Next (SUSFS v2.2.0 compatible)"
+        echo "::group::Add KernelSU Next (SUSFS v2.3.0 / KernelSU-Next 33355)"
 
         cd "$KERNEL_PLATFORM_FOLDER"
 
@@ -1186,45 +1186,56 @@ runs:
               patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
             fi
             ;;
-          "v2.2.0")
+          "v2.3.0")
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
               cd "$KSUN_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
-              FIX_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version"
 
-              echo "Checking SUSFS rejected patches..."
-              
-              while IFS= read -r -d '' rej; do
-                  file="$(basename "$rej" .rej)"
-                  fix="$FIX_DIR/fix_$file.patch"
-              
-                  if [ ! -f "$fix" ]; then
-                      echo "::error::Missing fix patch for $file"
-                      echo "Rejected file: $rej"
-                      exit 1
-                  fi
-              
-                  if ! patch --dry-run -p1 --forward < "$fix"; then
-                      echo "::error::Fix patch cannot be applied: $fix"
-                      exit 1
-                  fi
-              
-                  patch -p1 --forward < "$fix"
-                  rm -f "$rej"
-              
-              done < <(find ./kernel -type f -name "*.rej" -print0)
-              
-              if find ./kernel -type f -name "*.rej" -print -quit | grep -q .; then
-                  echo "::error::Unresolved SUSFS patch rejects"
-                  exit 1
+              # KernelSU-Next 33355 belongs to the v2.3.0 high-era patch set.
+              if [[ "$KSUVER" -lt 33341 ]]; then
+                echo "::error::The v2.3.0 high patch set requires KSUVER >= 33341; got $KSUVER"
+                exit 1
               fi
-              echo "Patching Hook Mode!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/overwrite_hook_mode.patch"
-              echo "Patching KSU_TOOLKIT Support for SusFS kernel!"
-              patch -p1 --forward < "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/$susfs_version/ksu_toolkit.patch"
+
+              FIX_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0/high"
+              test -s "$FIX_DIR/fix_dispatch.c.patch"
+              test -s "$FIX_DIR/fix_supercall.c.patch"
+              test -s "$FIX_DIR/susfs_extras.patch"
+
+              echo "Applying SUSFS v2.3.0 enable patch for KSUN $KSUVER..."
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+
+              echo "Resolving rejects with the v2.3.0 high-range patches..."
+              while IFS= read -r -d '' rej; do
+                file="$(basename "$rej" .rej)"
+                fix="$FIX_DIR/fix_$file.patch"
+
+                if [ ! -s "$fix" ]; then
+                  echo "::error::No v2.3.0 high-range fix exists for rejected file: $file"
+                  echo "Rejected file: $rej"
+                  exit 1
+                fi
+
+                if ! patch --dry-run -p1 --forward < "$fix"; then
+                  echo "::error::High-range fix cannot be applied: $fix"
+                  exit 1
+                fi
+
+                patch -p1 --forward < "$fix"
+                rm -f "$rej"
+              done < <(find ./kernel -type f -name "*.rej" -print0)
+
+              if find ./kernel -type f -name "*.rej" -print -quit | grep -q .; then
+                echo "::error::Unresolved SUSFS v2.3.0 rejects remain"
+                find ./kernel -type f -name "*.rej" -print
+                exit 1
+              fi
+
+              echo "Applying SUSFS v2.3.0 high-range extras..."
+              patch --dry-run -p1 --forward < "$FIX_DIR/susfs_extras.patch"
+              patch -p1 --forward < "$FIX_DIR/susfs_extras.patch"
             else
               cd "$KSU_FOLDER"
-              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
+              patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
             fi
             ;;
           *)
