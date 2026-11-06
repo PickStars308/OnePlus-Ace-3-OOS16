@@ -901,45 +901,51 @@ runs:
         
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "0"
 
-        echo "Pinning kernel_patches to SUSFS v2.3.0 high-33341..."
-        PATCH_REF="ffa6aa5a0a"
+        echo "Pinning kernel_patches to official SUSFS v2.3.0 patch set..."
 
-        echo "Fetching all remote branches from kernel_patches..."
-        git -C kernel_patches fetch --no-tags origin \
-            '+refs/heads/*:refs/remotes/origin/*'
+        # Official WildKernels/kernel_patches commit
+        PATCH_REF="b61ceb600da12ef1093597d8a4dfc15d0297b3c1"
         
-        echo "Checking target commit: ${PATCH_REF}"
+        echo "Fetching kernel_patches main history..."
+        git -C kernel_patches fetch --no-tags origin main
         
+        echo "Verifying target commit: ${PATCH_REF}"
         if ! git -C kernel_patches cat-file -e "${PATCH_REF}^{commit}" 2>/dev/null; then
-            echo "❌ Target commit ${PATCH_REF} is not available in fetched branches."
-            echo "========== REMOTE BRANCHES =========="
-            git -C kernel_patches branch -r
-        
-            echo "========== RECENT COMMITS =========="
-            git -C kernel_patches log --all --oneline -30
-        
+            echo "ERROR: Target commit is not available."
+            git -C kernel_patches log --oneline --all -10
             exit 1
         fi
         
         PATCH_COMMIT="$(git -C kernel_patches rev-parse "${PATCH_REF}^{commit}")"
         
-        echo "✅ Target commit found: ${PATCH_COMMIT}"
-        
+        echo "Checking out kernel_patches commit: ${PATCH_COMMIT}"
         git -C kernel_patches switch --detach "$PATCH_COMMIT"
         
-        echo "========== PINNED PATCH VERSION =========="
-        git -C kernel_patches log -1 --format='%H%n%s'
+        KERNEL_PATCHES_FOLDER="$(realpath kernel_patches)"
+        PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0"
         
-        PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0/high-33341"
+        echo "Checking SUSFS v2.3.0 patch directory..."
         
-        echo "========== VERIFY KSUN HIGH-33341 PATCHES =========="
         if [ ! -d "$PATCH_DIR" ]; then
-          echo "::error::Missing SUSFS high-33341 patch directory: $PATCH_DIR"
-          exit 1
+            echo "ERROR: SUSFS v2.3.0 patch directory not found:"
+            echo "$PATCH_DIR"
+            exit 1
         fi
         
-        find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' -printf '%f\n' | sort
+        for required_patch in \
+            "fix_init.c.patch" \
+            "overwrite_hook_mode.patch" \
+            "ksu_toolkit.patch"
+        do
+            if [ ! -f "$PATCH_DIR/$required_patch" ]; then
+                echo "ERROR: Required patch missing: $PATCH_DIR/$required_patch"
+                exit 1
+            fi
+        done
         
+        echo "SUSFS v2.3.0 patch directory verified."
+        echo "Patch directory: $PATCH_DIR"
+
         echo "========== PINNED PATCH VERSION =========="
         git -C kernel_patches log -1 --oneline
         
@@ -1009,6 +1015,42 @@ runs:
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" log -1 --format='%H %s'
         
         git -C "$KERNEL_PLATFORM_FOLDER/KernelSU-Next" submodule update --init --recursive
+
+        # Verify KernelSU-Next UAPI version
+        KSUN_FOLDER="$KERNEL_PLATFORM_FOLDER/KernelSU-Next"
+        UAPI_HEADER="$KSUN_FOLDER/uapi/supercall.h"
+        DISPATCH_FILE="$KSUN_FOLDER/kernel/supercall/dispatch.c"
+        
+        echo "Checking KernelSU-Next UAPI version..."
+        
+        if [ ! -f "$UAPI_HEADER" ]; then
+            echo "ERROR: KernelSU UAPI header not found: $UAPI_HEADER"
+            exit 1
+        fi
+        
+        if [ ! -f "$DISPATCH_FILE" ]; then
+            echo "ERROR: KernelSU dispatch file not found: $DISPATCH_FILE"
+            exit 1
+        fi
+        
+        KSUN_UAPI_VERSION="$(
+            sed -nE 's/.*KERNEL_SU_UAPI_VERSION[^0-9]*([0-9]+).*/\1/p' \
+                "$UAPI_HEADER" | head -n 1
+        )"
+        
+        echo "Detected KernelSU UAPI version: ${KSUN_UAPI_VERSION:-UNKNOWN}"
+        
+        if [ "$KSUN_UAPI_VERSION" != "5" ]; then
+            echo "ERROR: Expected KernelSU UAPI version 5."
+            exit 1
+        fi
+        
+        if ! grep -q 'cmd.uapi_version = KERNEL_SU_UAPI_VERSION' "$DISPATCH_FILE"; then
+            echo "ERROR: KernelSU UAPI dispatch implementation check failed."
+            exit 1
+        fi
+        
+        echo "KernelSU UAPI version 5 verified."
 
         echo "========== CHECK KERNELSU UAPI =========="
 
@@ -1212,58 +1254,89 @@ runs:
               patch -p1 --forward < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch" || true
             fi
             ;;
-          "v2.3.0")
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              cd "$KSUN_FOLDER"
-          
-              echo "========== APPLY SUSFS BASE PATCH =========="
-          
-              BASE_PATCH="$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
-          
-              if [ ! -f "$BASE_PATCH" ]; then
-                echo "::error::Missing SUSFS base patch: $BASE_PATCH"
+          v2.3.0)
+            echo "========================================="
+            echo "Applying SUSFS v2.3.0 patches"
+            echo "========================================="
+        
+            cd "$KSUN_FOLDER"
+        
+            BASE_PATCH="$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
+        
+            if [ ! -f "$BASE_PATCH" ]; then
+                echo "ERROR: SUSFS base patch not found:"
+                echo "$BASE_PATCH"
                 exit 1
-              fi
-          
-              patch -p1 --forward --fuzz=3 < "$BASE_PATCH"
-          
-              echo "========== APPLY KSUN 33355 HIGH-33341 PATCHES =========="
-          
-              PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0/high-33341"
-          
-              if [ ! -d "$PATCH_DIR" ]; then
-                echo "::error::Missing KSUN high-33341 patch directory"
-                exit 1
-              fi
-          
-              mapfile -t FIX_PATCHES < <(
-                find "$PATCH_DIR" -maxdepth 1 -type f -name '*.patch' | sort
-              )
-          
-              if [ "${#FIX_PATCHES[@]}" -eq 0 ]; then
-                echo "::error::No SUSFS fix patches found"
-                exit 1
-              fi
-          
-              echo "Found ${#FIX_PATCHES[@]} fix patches"
-          
-              for patch_file in "${FIX_PATCHES[@]}"; do
-                echo "Applying: $(basename "$patch_file")"
-                patch -p1 --forward --fuzz=3 < "$patch_file"
-              done
-          
-              echo "========== SUSFS KSUN PATCHES APPLIED =========="
-          
-            else
-              cd "$KSU_FOLDER"
-          
-              patch -p1 --forward --fuzz=3 \
-                < "$SUSFS_FOLDER/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch"
             fi
-            ;;
-          *)
-            echo "::error::Unsupported SUSFS version: $susfs_version"
-            exit 1
+        
+            if [ ! -d "$PATCH_DIR" ]; then
+                echo "ERROR: SUSFS fix patch directory not found:"
+                echo "$PATCH_DIR"
+                exit 1
+            fi
+        
+            echo "Checking whether SUSFS base patch is already applied..."
+        
+            if patch --dry-run -R -p1 < "$BASE_PATCH" >/dev/null 2>&1; then
+                echo "SUSFS base patch is already applied."
+            else
+                echo "Applying SUSFS base patch..."
+        
+                if patch -p1 --forward --fuzz=3 < "$BASE_PATCH"; then
+                    echo "SUSFS base patch applied successfully."
+                else
+                    echo "Base patch had rejected hunks. Checking fix patches..."
+        
+                    if [ ! -d "./kernel" ]; then
+                        echo "ERROR: KernelSU kernel directory not found."
+                        exit 1
+                    fi
+        
+                    mapfile -t REJECTS < <(
+                        find ./kernel -maxdepth 2 -type f -name '*.rej' -print | sort
+                    )
+        
+                    if [ "${#REJECTS[@]}" -eq 0 ]; then
+                        echo "ERROR: Base patch failed without generating reject files."
+                        exit 1
+                    fi
+        
+                    for reject_file in "${REJECTS[@]}"; do
+                        reject_name="$(basename "$reject_file" .rej)"
+                        fix_patch="$PATCH_DIR/fix_${reject_name}.patch"
+        
+                        echo "Rejected file: $reject_file"
+                        echo "Looking for fix patch: $fix_patch"
+        
+                        if [ ! -f "$fix_patch" ]; then
+                            echo "ERROR: Matching fix patch does not exist:"
+                            echo "$fix_patch"
+                            exit 1
+                        fi
+        
+                        echo "Applying fix patch: $(basename "$fix_patch")"
+                        patch -p1 --forward --fuzz=3 < "$fix_patch"
+        
+                        rm -f "$reject_file"
+                    done
+                fi
+            fi
+        
+            echo "Checking for remaining rejected patches..."
+        
+            if find ./kernel -maxdepth 2 -type f -name '*.rej' -print -quit | grep -q .; then
+                echo "ERROR: Unresolved patch reject files remain:"
+                find ./kernel -maxdepth 2 -type f -name '*.rej' -print
+                exit 1
+            fi
+        
+            echo "Applying overwrite_hook_mode.patch..."
+            patch -p1 --forward --fuzz=3 < "$PATCH_DIR/overwrite_hook_mode.patch"
+        
+            echo "Applying ksu_toolkit.patch..."
+            patch -p1 --forward --fuzz=3 < "$PATCH_DIR/ksu_toolkit.patch"
+        
+            echo "SUSFS v2.3.0 patches applied successfully."
             ;;
         esac
         
