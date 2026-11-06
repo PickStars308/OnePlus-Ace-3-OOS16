@@ -1040,7 +1040,7 @@ runs:
         fi
         ln -s "$KSUN_DIR/kernel" "$DRIVERS_DIR/kernelsu"
         grep -Fqx 'obj-$(CONFIG_KSU) += kernelsu/' "$DRIVERS_DIR/Makefile" || \
-          printf '\\nobj-$(CONFIG_KSU) += kernelsu/\\n' >> "$DRIVERS_DIR/Makefile"
+          printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> "$DRIVERS_DIR/Makefile"
         if ! grep -Fqx 'source "drivers/kernelsu/Kconfig"' "$DRIVERS_DIR/Kconfig"; then
           # Same insertion point as KernelSU-Next's official setup.sh.
           if ! grep -q '^endmenu' "$DRIVERS_DIR/Kconfig"; then
