@@ -2169,7 +2169,15 @@ runs:
         # Remove empty layout subdirectories
         find "$CCACHE_DIR" -type d -empty -delete
 
-        cp "${{ env.CCACHE_LOGFILE }}" "$CCACHE_DIR"
+                # 只有 ccache 日志文件存在时才复制
+        CCACHE_LOGFILE_PATH="${{ env.CCACHE_LOGFILE }}"
+        
+        if [ -n "$CCACHE_LOGFILE_PATH" ] && [ -f "$CCACHE_LOGFILE_PATH" ]; then
+          echo "Copy ccache log to cache directory..."
+          cp -f "$CCACHE_LOGFILE_PATH" "$CCACHE_DIR/"
+        else
+          echo "⚠ CCACHE_LOGFILE is empty or file does not exist, skipping copy."
+        fi
         
         if [ "${{ inputs.debug }}" == "true" ]; then
           if [ -f "${{ env.CCACHE_LOGFILE }}" ]; then
