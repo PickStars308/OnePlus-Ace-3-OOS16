@@ -942,34 +942,28 @@ runs:
 
         cd "$KERNEL_PLATFORM_FOLDER"
 
-        SUKI_REF="${{ inputs.ksu_branch_or_hash }}"
-        SUKI_REF="${SUKI_REF:-main}"
-        echo "Installing SukiSU Ultra ref $SUKI_REF"
-        git clone https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU
+        # SukiSU Ultra builtin carries SUSFS Kconfig and manual-hook support.
+        # The main branch is a different runtime-hook architecture.
+        SUKI_REF="builtin"
+        echo "Installing SukiSU Ultra builtin branch"
+        curl --fail --location --retry 3 --proto '=https' -LSs \
+          "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" \
+          | bash -s "$SUKI_REF"
         KSUN_DIR="$KERNEL_PLATFORM_FOLDER/KernelSU"
-        git -C "$KSUN_DIR" checkout "$SUKI_REF"
+        test -d "$KSUN_DIR/.git"
         ACTUAL_COMMIT="$(git -C "$KSUN_DIR" rev-parse HEAD)"
         echo "KSUN_TAG=$SUKI_REF" >> "$GITHUB_ENV"
         echo "KSUN_COMMIT_SHA=$ACTUAL_COMMIT" >> "$GITHUB_ENV"
         echo "SukiSU Ultra commit: $ACTUAL_COMMIT"
-
-        # The SukiSU Ultra repository is integrated under the same kernel path
-        # as upstream KernelSU. Keep the rest of the OnePlus build unchanged.
-        cd "$COMMON_KERNEL_FOLDER"
-        curl --fail --location --proto '=https' -LSs \
-          "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" \
-          | bash -s "$ACTUAL_COMMIT"
-        KSUN_DIR="$KERNEL_PLATFORM_FOLDER/KernelSU"
         git -C "$KSUN_DIR" submodule update --init --recursive
 
         echo "SukiSU Ultra commit: $ACTUAL_COMMIT"
         cd "$KSUN_DIR/kernel"
 
-        COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
-        KSU_VERSION=$((COMMITS_COUNT + 30000))
-        echo "SukiSU Ultra source commit count: $COMMITS_COUNT"
-        echo "SukiSU Ultra calculated build version: $KSU_VERSION"
-        sed -i -E "s/DKSU_VERSION=[0-9]+/DKSU_VERSION=${KSU_VERSION}/" Makefile
+        # SukiSU Ultra defines its own version scheme in kernel/Kbuild.
+        # Do not rewrite it using KernelSU-Next's version formula.
+        KSU_VERSION="$(git -C "$KSUN_DIR" describe --tags --always)"
+        echo "SukiSU Ultra source version: $KSU_VERSION"
         if [ -f ksu.c ]; then
           sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
         fi
@@ -1158,9 +1152,21 @@ runs:
             fi
             ;;
           "v2.3.0")
-            echo "::error::SukiSU Ultra SUSFS v2.3.0 integration is not yet validated against the selected source."
-            echo "::error::Refusing to apply KernelSU-Next-specific high patches to SukiSU Ultra."
-            exit 1
+            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+              # The builtin branch already provides SUSFS configuration.
+              # Only the generic kernel-side SUSFS patch is applied later.
+              cd "$KSUN_FOLDER"
+              if ! grep -q 'config KSU_SUSFS' kernel/Kconfig; then
+                echo "::error::SukiSU Ultra builtin ref lacks CONFIG_KSU_SUSFS"
+                exit 1
+              fi
+              echo "Using SukiSU Ultra builtin SUSFS integration; skipping KernelSU-Next-only high fixes."
+              cd "$COMMON_KERNEL_FOLDER"
+              grep -qxF 'CONFIG_KSU_SUSFS=y' arch/arm64/configs/gki_defconfig || echo 'CONFIG_KSU_SUSFS=y' >> arch/arm64/configs/gki_defconfig
+            else
+              echo "::error::SukiSU Ultra build requires KSUN integration mode"
+              exit 1
+            fi
             ;;
           *)
             echo "::error::Unsupported SUSFS version: $susfs_version"
