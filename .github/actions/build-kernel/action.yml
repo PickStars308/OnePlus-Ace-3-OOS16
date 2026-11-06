@@ -579,14 +579,6 @@ runs:
         
         echo "✅ Detected Clang: $CLANG_VERSION"
         echo "::endgroup::"
-
-    - name: Debug SUSFS patch rejects
-      if: always()
-      shell: bash
-      run: |
-        KSUN_FOLDER="$GITHUB_WORKSPACE/KernelSU-Next"
-        find "$GITHUB_WORKSPACE" -type f -name '*.rej' -print
-
     
     - name: Check or Detect Rust & bindgen
       shell: bash
@@ -1625,6 +1617,41 @@ runs:
         
         echo "✅ BBG LSM added"
         echo "::endgroup::"
+    
+    - name: Debug SUSFS Patch Rejects
+            if: always()
+            shell: bash
+            run: |
+              set +e
+    
+              echo "========================================="
+              echo "DEBUG: SUSFS PATCH REJECT FILES"
+              echo "========================================="
+    
+              echo "[1] Searching all reject files..."
+    
+              find "$GITHUB_WORKSPACE" -type f -name '*.rej' -print
+    
+              echo
+              echo "[2] Printing reject file contents..."
+    
+              while IFS= read -r reject_file; do
+                  echo
+                  echo "========================================="
+                  echo "FILE: $reject_file"
+                  echo "========================================="
+                  cat "$reject_file"
+              done < <(find "$GITHUB_WORKSPACE" -type f -name '*.rej' -print)
+    
+              echo
+              echo "========================================="
+              echo "DEBUG: SOURCE COMMITS"
+              echo "========================================="
+    
+              find "$GITHUB_WORKSPACE" -type d -name "KernelSU-Next" -print
+              find "$GITHUB_WORKSPACE" -type d -name "kernel_patches" -print
+    
+              echo "DEBUG FINISHED"
 
     - name: Apply KSU Hooks
       shell: bash
