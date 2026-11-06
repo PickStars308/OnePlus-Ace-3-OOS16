@@ -2069,6 +2069,8 @@ runs:
         
         KCFLAGS="$KCFLAGS -Wno-error -pipe ${KCFLAGS_EXTRA}"
         KCPPFLAGS="$KCPPFLAGS -DCONFIG_OPTIMIZE_INLINING"
+        # 设置 ccache 基础目录，避免 set -u 下变量未定义
+        export CCACHE_BASEDIR="${CCACHE_BASEDIR:-${WORKSPACE:-$GITHUB_WORKSPACE}}"
         
         echo "============================================"
         echo "🔧 Build Configuration"
