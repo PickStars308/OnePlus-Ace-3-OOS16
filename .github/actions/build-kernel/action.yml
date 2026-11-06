@@ -978,6 +978,19 @@ runs:
         echo "KSUN_UAPI_VERSION=$KSUN_UAPI_VERSION" >> "$GITHUB_ENV"
         echo "KSUN_TAG=$KSUN_TAG" >> "$GITHUB_ENV"
 
+        echo "========== KSUN CURRENT =========="
+        git -C KernelSU-Next log -1 --format=fuller
+        git -C KernelSU-Next describe --always --tags
+        
+        echo "========== PATCH 33405 =========="
+        git -C kernel_patches show -s --format=fuller \
+          c78291aeb0dca025f21e6b197e0aa4fde42e065d
+        
+        echo "========== PATCH FILES =========="
+        git -C kernel_patches ls-tree -r --name-only \
+          c78291aeb0dca025f21e6b197e0aa4fde42e065d \
+          next/susfs_fix_patches/v2.3.0
+  
         echo "========== KernelSU-Next VERSION =========="
         echo "Tag: $KSUN_TAG"
         echo "Commit: $KSUN_COMMIT_SHA"
