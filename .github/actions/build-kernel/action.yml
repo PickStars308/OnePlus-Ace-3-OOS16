@@ -943,26 +943,11 @@ runs:
             fi
         done
 
-        echo "========== init.c.rej =========="
-        if [ -f kernel/core/init.c.rej ]; then
-            cat kernel/core/init.c.rej
-        fi
-        
-        echo "========== init.c current source =========="
-        sed -n '100,220p' kernel/core/init.c
-        
-        echo "========== init.c patch =========="
-        cat "$PATCH_DIR/fix_init.c.patch"
-
         echo "SUSFS v2.3.0 patch directory verified."
         echo "Patch directory: $PATCH_DIR"
 
         echo "========== PINNED PATCH VERSION =========="
         git -C kernel_patches log -1 --oneline
-        
-        echo "========== CHECK SUSFS v2.2.0 PATCH FILES =========="
-        
-        PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.2.0"
         
         if [ ! -d "$PATCH_DIR" ]; then
           echo "::error::SUSFS v2.2.0 patch directory missing"
@@ -1380,9 +1365,42 @@ runs:
                         fi
         
                         echo "Applying fix patch: $(basename "$fix_patch")"
-                        patch -p1 --forward --fuzz=3 < "$fix_patch"
-        
-                        rm -f "$reject_file"
+
+                        if patch -p1 --forward --fuzz=3 < "$fix_patch"; then
+                            echo "✅ Fix patch applied successfully."
+                            rm -f "$reject_file"
+                        else
+                            echo "::error::Fix patch failed: $(basename "$fix_patch")"
+                        
+                            source_file="${reject_file%.rej}"
+                        
+                            echo ""
+                            echo "========== REJECT FILE =========="
+                            if [ -f "$reject_file" ]; then
+                                cat "$reject_file"
+                            else
+                                echo "Reject file not found: $reject_file"
+                            fi
+                        
+                            echo ""
+                            echo "========== ORIGINAL SOURCE FILE =========="
+                            if [ -f "$source_file" ]; then
+                                sed -n '1,260p' "$source_file"
+                            else
+                                echo "Source file not found: $source_file"
+                            fi
+                        
+                            echo ""
+                            echo "========== FIX PATCH CONTENT =========="
+                            cat "$fix_patch"
+                        
+                            echo ""
+                            echo "========== CURRENT DIRECTORY =========="
+                            pwd
+                        
+                            exit 1
+                        fi
+
                     done
                 fi
             fi
