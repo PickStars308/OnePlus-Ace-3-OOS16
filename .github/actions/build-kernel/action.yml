@@ -1176,7 +1176,31 @@ runs:
         else
           echo "NEED_HOOKS=false" >> $GITHUB_ENV
         fi
+
+        # Initialize SUSFS patch directory in the current shell
+        echo "Initializing SUSFS patch directory..."
         
+        KERNEL_PATCHES_FOLDER="$GITHUB_WORKSPACE/kernel_patches"
+        PATCH_DIR="$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches/v2.3.0"
+        
+        if [ ! -d "$PATCH_DIR" ]; then
+            echo "ERROR: SUSFS v2.3.0 patch directory not found!"
+            echo "Expected path: $PATCH_DIR"
+            echo "Workspace: $GITHUB_WORKSPACE"
+        
+            if [ -d "$KERNEL_PATCHES_FOLDER" ]; then
+                echo "Available SUSFS patch directories:"
+                find "$KERNEL_PATCHES_FOLDER/next/susfs_fix_patches" \
+                    -maxdepth 2 -type d -print
+            else
+                echo "ERROR: kernel_patches repository was not found."
+            fi
+        
+            exit 1
+        fi
+        
+        echo "SUSFS patch directory: $PATCH_DIR"
+
         case "$susfs_version" in
           "v1.5.8")
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
