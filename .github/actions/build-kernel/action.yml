@@ -929,37 +929,40 @@ runs:
         sed -i 's/protected_modules = \[.*\]/protected_modules = []/' common/modules.bzl || true
         echo "::endgroup::"
 
-    - name: Add KernelSU Next Stable v3.4.2
+    - name: Add KernelSU Next (SUSFS v2.2.0 compatible)
       shell: bash
       if: ${{ inputs.ksu_type == 'KSUN' }}
       run: |
         set -euo pipefail
-        echo "::group::Add KernelSU Next Stable"
+        echo "::group::Add KernelSU Next (SUSFS v2.2.0 compatible)"
 
         cd "$KERNEL_PLATFORM_FOLDER"
 
-        KSUN_TAG="${{ inputs.ksu_branch_or_hash }}"
-        KSUN_TAG="${KSUN_TAG:-v3.4.2}"
+        # kernel_patches cd63f371 is built for this exact KernelSU-Next commit.
+        KSUN_REF="${{ inputs.ksu_branch_or_hash }}"
+        KSUN_REF="${KSUN_REF:-234f6e040fcbca18b16d2398e1aa225712ec99ad}"
+        KSUN_EXPECTED="234f6e040fcbca18b16d2398e1aa225712ec99ad"
 
-        if [[ ! "$KSUN_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "::error::Only official release tags are allowed: $KSUN_TAG"
+        if [[ "$KSUN_REF" != "$KSUN_EXPECTED" ]]; then
+          echo "::error::SUSFS v2.2.0 fix patches require KernelSU-Next $KSUN_EXPECTED"
+          echo "::error::Received KernelSU-Next ref: $KSUN_REF"
           exit 1
         fi
 
-        echo "Installing KernelSU-Next $KSUN_TAG"
+        echo "Installing KernelSU-Next commit $KSUN_REF"
 
         curl --fail --location --retry 3 \
           --proto '=https' \
-          "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${KSUN_TAG}/kernel/setup.sh" \
-          | bash -s "$KSUN_TAG"
+          "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/${KSUN_REF}/kernel/setup.sh" \
+          | bash -s "$KSUN_REF"
 
         KSUN_DIR="$KERNEL_PLATFORM_FOLDER/KernelSU-Next"
         test -d "$KSUN_DIR/.git"
 
-        ACTUAL_TAG="$(git -C "$KSUN_DIR" describe --tags --exact-match HEAD)"
+        ACTUAL_COMMIT="$(git -C "$KSUN_DIR" rev-parse HEAD)"
 
-        if [[ "$ACTUAL_TAG" != "$KSUN_TAG" ]]; then
-          echo "::error::KernelSU tag mismatch: $ACTUAL_TAG"
+        if [[ "$ACTUAL_COMMIT" != "$KSUN_EXPECTED" ]]; then
+          echo "::error::KernelSU-Next commit mismatch: $ACTUAL_COMMIT"
           exit 1
         fi
 
@@ -977,14 +980,12 @@ runs:
           exit 1
         fi
 
-        KSUN_COMMIT="$(git -C "$KSUN_DIR" rev-parse HEAD)"
-
-        echo "KSUN_TAG=$KSUN_TAG" >> "$GITHUB_ENV"
-        echo "KSUN_COMMIT_SHA=$KSUN_COMMIT" >> "$GITHUB_ENV"
+        echo "KSUN_TAG=$KSUN_REF" >> "$GITHUB_ENV"
+        echo "KSUN_COMMIT_SHA=$ACTUAL_COMMIT" >> "$GITHUB_ENV"
         echo "KSUN_UAPI_VERSION=$UAPI_VERSION" >> "$GITHUB_ENV"
 
-        echo "KernelSU-Next: $KSUN_TAG"
-        echo "Commit: $KSUN_COMMIT"
+        echo "KernelSU-Next ref: $KSUN_REF"
+        echo "Commit: $ACTUAL_COMMIT"
         echo "UAPI: $UAPI_VERSION"
 
         cd "$KSUN_DIR/kernel"
