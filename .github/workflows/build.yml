@@ -621,7 +621,7 @@ jobs:
       # ==================================================
       - name: Build OnePlus Ace 3 Kernel
         id: kernel-build
-        uses: WildKernels/OnePlus_KernelSU_SUSFS/.github/actions/build-kernel@d44240312aeb978463b66c3a3155c6d99a7c7a3c
+        uses: ./.github/actions/build-kernel
         with:
           op_config_json: ${{ steps.config.outputs.json }}
 
