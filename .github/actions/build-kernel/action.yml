@@ -988,6 +988,12 @@ runs:
           exit 1
         fi
         echo "KSUN_UAPI_VERSION=$UAPI_VERSION" >> "$GITHUB_ENV"
+        if [ "$UAPI_VERSION" = "6" ] && [ -f "$KSUN_DIR/kernel/susfs/Makefile" ]; then
+          echo "KSUN_SUSFS_LKM=true" >> "$GITHUB_ENV"
+          echo "UAPI 6: using upstream SUSFS guard LKM instead of in-tree SUSFS patches"
+        else
+          echo "KSUN_SUSFS_LKM=false" >> "$GITHUB_ENV"
+        fi
         echo "KernelSU-Next UAPI: $UAPI_VERSION"
 
         cd "$KSUN_DIR/kernel"
@@ -1092,7 +1098,7 @@ runs:
 
     - name: Apply SUSFS Patches
       shell: bash
-      if: ${{ env.OP_SUSFS == 'true' }}
+      if: ${{ env.OP_SUSFS == 'true' && env.KSUN_SUSFS_LKM != 'true' }}
       run: |
         set -euo pipefail
         echo "::group::Apply SUSFS patches"
@@ -2238,6 +2244,37 @@ runs:
         echo "============================================"
         echo "::endgroup::"
 
+    - name: Build UAPI 6 SUSFS guard LKM
+      if: ${{ env.OP_SUSFS == 'true' && env.KSUN_SUSFS_LKM == 'true' }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "::group::Build upstream SUSFS guard LKM"
+        KDIR="$COMMON_KERNEL_FOLDER"
+        MOD_DIR="$KSUN_FOLDER/kernel/susfs"
+        test -f "$MOD_DIR/Makefile"
+        test -f "$KDIR/out/.config"
+        if ! grep -qx 'CONFIG_MODULES=y' "$KDIR/out/.config"; then
+          echo "::error::CONFIG_MODULES=y is required to build the SUSFS guard LKM."
+          exit 1
+        fi
+        export ARCH=arm64 LLVM=1 LLVM_IAS=1
+        make -C "$KDIR" O="$KDIR/out" M="$MOD_DIR" modules_prepare
+        make -C "$KDIR" O="$KDIR/out" M="$MOD_DIR" modules -j"$(nproc)"
+        test -s "$MOD_DIR/susfs_guard_lkm.ko"
+        mkdir -p "$ARTIFACTS_FOLDER/susfs-lkm"
+        cp "$MOD_DIR/susfs_guard_lkm.ko" "$ARTIFACTS_FOLDER/susfs-lkm/"
+        echo "SUSFS guard LKM built; it is not embedded into the boot Image."
+        echo "::endgroup::"
+
+    - name: Upload UAPI 6 SUSFS guard LKM
+      if: ${{ env.OP_SUSFS == 'true' && env.KSUN_SUSFS_LKM == 'true' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.OP_MODEL }}-UAPI6-susfs-guard-lkm
+        path: ${{ env.ARTIFACTS_FOLDER }}/susfs-lkm/susfs_guard_lkm.ko
+        if-no-files-found: error
+
     - name: 📊 ccache Post-Build Statistics
       id: ccache_stats
       if: ${{ success() && (inputs.clean == false || inputs.clean == 'false') }}
@@ -2408,7 +2445,7 @@ runs:
         esac
         
         ZIP_MODEL=$(echo "$OP_MODEL" | sed 's/-[0-9]\+\.[0-9]\+\.[0-9]\+$//')
-        if [ "${{ env.OP_SUSFS }}" = true ]; then
+        if [ "${{ env.OP_SUSFS }}" = true ] && [ "${KSUN_SUSFS_LKM:-false}" != true ]; then
           ZIP_NAME="AK3_${ZIP_MODEL}_${OP_OS_VERSION}_${KERNEL_FULL_VER}_${{ inputs.ksu_type }}_${KSUVER:-unknown}_SuSFS_${SUSVER:-unknown}.zip"
         else
           ZIP_NAME="AK3_${ZIP_MODEL}_${OP_OS_VERSION}_${KERNEL_FULL_VER}_${{ inputs.ksu_type }}_${KSUVER:-unknown}.zip"
