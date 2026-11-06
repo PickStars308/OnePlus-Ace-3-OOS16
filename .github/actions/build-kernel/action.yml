@@ -1063,8 +1063,8 @@ runs:
         echo "COMMITS_COUNT=$COMMITS_COUNT"
         echo "KSU_VERSION=$KSU_VERSION"
         
-        if [ "$KSU_VERSION" -ne 33355 ]; then
-            echo "::error::Expected KSUN 33355, got $KSU_VERSION"
+        if [ "$KSU_VERSION" -ne 33457 ]; then
+            echo "::error::Expected KSUN 33457, got $KSU_VERSION"
             exit 1
         fi
                 
