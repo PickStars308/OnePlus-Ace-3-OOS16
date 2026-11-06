@@ -900,24 +900,13 @@ runs:
         }
         
         retry_clone "https://github.com/WildKernels/kernel_patches.git" "main" "1"
-
-        echo "========== PATCH REPOSITORY COMMIT =========="
-        git -C kernel_patches log -1 --oneline || true
         
-        echo "========== FIND KSUN REPOSITORY =========="
-        find "$KERNEL_PLATFORM_FOLDER" -maxdepth 6 \
-          -type d -name ".git" -print 2>/dev/null || true
+        echo "Pinning kernel_patches to SUSFS v2.2.0..."
+        git -C kernel_patches fetch --depth=1 origin cd63f371d9
+        git -C kernel_patches checkout --detach FETCH_HEAD
         
-        echo "========== FIND KSUN DIRECTORY =========="
-        find "$KERNEL_PLATFORM_FOLDER" -maxdepth 5 \
-          -type d -iname '*kernelsu*' -print 2>/dev/null || true
-        
-        echo "========== AVAILABLE SUSFS FIX PATCHES =========="
-        find kernel_patches/next -maxdepth 5 -type f \
-          \( -name '*ksud*' -o -name '*integration*' \) -print | sort
-        
-        echo "========== AVAILABLE V2.2.0 PATCHES =========="
-        find kernel_patches/next -path '*v2.2.0*' -type f -print | sort
+        echo "========== PINNED PATCH VERSION =========="
+        git -C kernel_patches log -1 --oneline
         
         if [ "${{ env.OP_SUSFS }}" = true ]; then
           echo "Using SUSFS branch/commit: $SUSFS_BRANCH"
