@@ -993,12 +993,13 @@ runs:
         cd "$KSUN_DIR/kernel"
 
         COMMITS_COUNT=$(/usr/bin/git rev-list --count HEAD)
-        if [[ "$COMMITS_COUNT" -lt 2684 ]]; then
-          BASE_VERSION=10200
-        else
-          BASE_VERSION=30000
+        # This KernelSU-Next generation defines KSU_VERSION as 30000 + git count.
+        # A shallow history is not sufficient to calculate the official value.
+        if [ -f "$KSUN_DIR/.git/shallow" ]; then
+          git -C "$KSUN_DIR" fetch --unshallow origin
         fi
-        KSU_VERSION=$((COMMITS_COUNT + BASE_VERSION))
+        COMMITS_COUNT="$(git -C "$KSUN_DIR" rev-list --count HEAD)"
+        KSU_VERSION=$((COMMITS_COUNT + 30000))
         echo "Selected KernelSU-Next version: $KSU_VERSION"
         if [[ "$KSUN_CHANNEL" == "custom" && -z "$KSUN_INPUT" && "$KSU_VERSION" != "33355" ]]; then
           echo "::error::Default custom commit was expected to produce 33355, got $KSU_VERSION"
@@ -1197,7 +1198,16 @@ runs:
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
               cd "$KSUN_FOLDER"
 
-              # KernelSU-Next 33355 belongs to the v2.3.0 high-era patch set.
+              # UAPI 6 upstream introduced an independent SUSFS guard LKM.
+              # It is not compatible with the older in-tree 10_enable patch.
+              if [[ "${KSUN_UAPI_VERSION:-}" == "6" ]] && [ -f "$KSUN_FOLDER/kernel/susfs/Makefile" ]; then
+                echo "::error::This UAPI 6 revision ships SUSFS as a separate susfs_guard_lkm.ko."
+                echo "::error::The current workflow builds in-tree SUSFS v2.3.0, not the LKM."
+                echo "::error::Do not apply 10_enable_susfs_for_ksu.patch to this revision."
+                echo "::error::A dedicated SUSFS LKM build and packaging stage is required."
+                exit 1
+              fi
+
               if [[ "$KSUVER" -lt 33341 ]]; then
                 echo "::error::The v2.3.0 high patch set requires KSUVER >= 33341; got $KSUVER"
                 exit 1
