@@ -2259,7 +2259,16 @@ runs:
           exit 1
         fi
         export ARCH=arm64 LLVM=1 LLVM_IAS=1
-        make -C "$KDIR" O="$KDIR/out" M="$MOD_DIR" modules_prepare
+        # The Image-only build does not necessarily create Module.symvers or
+        # scripts/module.lds. Prepare the whole kernel first (without M=), then
+        # complete in-tree module modpost before compiling the external LKM.
+        make -C "$KDIR" O="$KDIR/out" modules_prepare
+        if [ ! -s "$KDIR/out/Module.symvers" ] || [ ! -s "$KDIR/out/scripts/module.lds" ]; then
+          echo "Generating kernel module symbols and linker script..."
+          make -C "$KDIR" O="$KDIR/out" modules -j"$(nproc)"
+        fi
+        test -s "$KDIR/out/Module.symvers" || { echo "::error::Missing kernel Module.symvers after modules build"; exit 1; }
+        test -s "$KDIR/out/scripts/module.lds" || { echo "::error::Missing kernel scripts/module.lds after modules build"; exit 1; }
         make -C "$KDIR" O="$KDIR/out" M="$MOD_DIR" modules -j"$(nproc)"
         test -s "$MOD_DIR/susfs_guard_lkm.ko"
         mkdir -p "$ARTIFACTS_FOLDER/susfs-lkm"
