@@ -1200,6 +1200,22 @@ runs:
         echo "Applying SUSFS patches..."
         cp "$SUSFS_FOLDER/kernel_patches/fs/"* "$COMMON_KERNEL_FOLDER/fs/"
         cp "$SUSFS_FOLDER/kernel_patches/include/linux/"* "$COMMON_KERNEL_FOLDER/include/linux/"
+
+        # SUSFS v2.3.0 priority UID filter compatibility with SukiSU builtin.
+        # SUSFS guards these declarations/implementations with
+        # CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER, but SukiSU builtin calls the
+        # APIs unconditionally and does not define that Kconfig symbol.
+        # Promote only the preprocessor guards to CONFIG_KSU_SUSFS. Keep the
+        # string literal CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER unchanged so
+        # userspace feature reporting remains compatible.
+        PRIORITY_PATCH="$SUSFS_FOLDER/kernel_patches/50_add_susfs_in_${SUSFS_KERNEL_BRANCH}.patch"
+        for PRIORITY_FILE in "$PRIORITY_PATCH" \
+                             "$COMMON_KERNEL_FOLDER/fs/susfs.c" \
+                             "$COMMON_KERNEL_FOLDER/include/linux/susfs.h"; do
+          [ -f "$PRIORITY_FILE" ] || continue
+          sed -i -E '/^[+ ]*#[[:space:]]*(ifdef|ifndef|endif).*CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER/ s/CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER/CONFIG_KSU_SUSFS/' "$PRIORITY_FILE"
+        done
+        echo "Normalized SUSFS priority UID filter guards to CONFIG_KSU_SUSFS"
         
         susfs_version=$(grep '#define SUSFS_VERSION' "$COMMON_KERNEL_FOLDER/include/linux/susfs.h" | awk -F'"' '{print $2}')
         echo "SUSVER=$susfs_version" >> $GITHUB_ENV
