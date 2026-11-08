@@ -1103,6 +1103,7 @@ runs:
         git -C "$SUKISU_FOLDER" fetch origin main:refs/remotes/origin/main
         ACTUAL_COMMIT="$(git -C "$SUKISU_FOLDER" rev-parse HEAD)"
         echo "SUKISU_COMMIT_SHA=$ACTUAL_COMMIT" >> "$GITHUB_ENV"
+        echo "KSU_COMMIT_SHA=$ACTUAL_COMMIT" >> "$GITHUB_ENV"
         echo "SUKISU_REF=$SUKISU_REF" >> "$GITHUB_ENV"
         MAIN_COUNT="$(git -C "$SUKISU_FOLDER" rev-list --count refs/remotes/origin/main)"
         KSU_VERSION=$((40000 + MAIN_COUNT - 2815))
@@ -2686,6 +2687,9 @@ runs:
           if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
             echo "KSUN Version: ${KSUVER:-unknown}"
             echo "KSUN commit SHA: ${KSU_SHA:-unknown}"
+          elif [ "${{ inputs.ksu_type }}" = "SUKISU" ]; then
+            echo "SukiSU-Ultra Version: ${KSUVER:-unknown}"
+            echo "SukiSU-Ultra commit SHA: ${KSU_SHA:-unknown}"
           else
             echo "KSU Version: ${KSUVER:-unknown}"
             echo "KSU commit SHA: ${KSU_SHA:-unknown}"
