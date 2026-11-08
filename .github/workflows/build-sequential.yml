@@ -352,6 +352,27 @@ jobs:
           ref: ${{ github.sha }}
 
       # ==================================================
+      # 1. 获取与本次内核 Root 类型匹配的管理器 APK
+      #    KSUN  : 官方 dev Manager CI artifact
+      #    KSU   : 官方最新 Release APK
+      #    SUKISU: SukiSU manager-ci arm64 APK
+      # ==================================================
+      - name: Fetch matching root manager APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x .github/scripts/fetch-manager-apk.sh
+          .github/scripts/fetch-manager-apk.sh "${{ inputs.ksu_type }}" "$GITHUB_WORKSPACE/manager-apk"
+
+      - name: Upload root manager APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.ksu_type == 'KSUN' && 'KernelSU-Next-Manager' || inputs.ksu_type == 'KSU' && 'KernelSU-Manager' || 'SukiSU-Ultra-Manager' }}
+          path: manager-apk/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      # ==================================================
       # 1. 拉取上游配置文件和 Manifest
       # ==================================================
       - name: Checkout upstream configuration
