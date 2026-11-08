@@ -2343,7 +2343,7 @@ runs:
           exit 1
         fi
         
-        if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+        if [ "${{ inputs.ksu_type }}" = "KSUN" ] || [ "${{ inputs.ksu_type }}" = "SUKISU" ]; then
           KSU_INIT_OBJ="$COMMON_KERNEL_FOLDER/out/drivers/kernelsu/core/init.o"
           KSU_BUILTIN_ARCHIVE="$COMMON_KERNEL_FOLDER/out/drivers/kernelsu/built-in.a"
           if [ ! -s "$KSU_INIT_OBJ" ] || [ ! -s "$KSU_BUILTIN_ARCHIVE" ]; then
