@@ -1112,6 +1112,11 @@ runs:
         if [ "$KSU_VERSION" -le 0 ]; then echo "::error::Invalid SukiSU version: $KSU_VERSION"; exit 1; fi
         echo "KSUVER=$KSU_VERSION" >> "$GITHUB_ENV"
         echo "KSU_BUILD_REF=$SUKISU_REF" >> "$GITHUB_ENV"
+        if [ "${{ env.OP_SUSFS }}" = "true" ] && ! grep -q "config KSU_SUSFS" "$SUKISU_FOLDER/kernel/Kconfig"; then
+          echo "::error::Selected SukiSU ref $SUKISU_REF does not include the builtin CONFIG_KSU_SUSFS integration."
+          echo "::error::For this Ace 3 SUSFS build, choose Custom with ref builtin or the verified builtin commit."
+          exit 1
+        fi
         DRIVERS_DIR="$COMMON_KERNEL_FOLDER/drivers"
         test -s "$DRIVERS_DIR/Makefile" && test -s "$DRIVERS_DIR/Kconfig"
         test -s "$SUKISU_FOLDER/kernel/Kbuild" && test -s "$SUKISU_FOLDER/kernel/Kconfig"
