@@ -1,5 +1,5 @@
 
-name: Build OnePlus Ace 3 - KernelSU Next + SUSFS
+name: Build OnePlus Ace 3 - KernelSU / SukiSU-Ultra + SUSFS
 
 on:
   workflow_dispatch:
