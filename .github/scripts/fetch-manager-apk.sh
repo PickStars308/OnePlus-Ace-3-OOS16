@@ -45,7 +45,7 @@ case "$MANAGER_TYPE" in
     URL="https://nightly.link/KernelSU-Next/KernelSU-Next/workflows/build-manager-ci/dev/manager.zip"
     echo "Fetching the latest successful KernelSU-Next manager CI artifact..."
     curl -fL --retry 5 --retry-delay 3 --connect-timeout 30 "$URL" -o "$ZIP"
-    mapfile -t APK_ENTRIES < <(unzip -Z1 "$ZIP" | grep -E '\\.apk$' || true)
+    mapfile -t APK_ENTRIES < <(unzip -Z1 "$ZIP" | grep -E '\.apk$' || true)
     if [[ "${#APK_ENTRIES[@]}" -ne 1 ]]; then
       printf 'Unexpected APK count in KernelSU-Next artifact: %s\n' "${#APK_ENTRIES[@]}"
       unzip -Z1 "$ZIP"
@@ -56,13 +56,13 @@ case "$MANAGER_TYPE" in
   KSU)
     download_release_apk \
       "https://api.github.com/repos/tiann/KernelSU/releases/latest" \
-      'KernelSU_.*release\\.apk$' \
+      'KernelSU_.*release\.apk$' \
       "KernelSU-Manager.apk"
     ;;
   SUKISU)
     download_release_apk \
       "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/tags/manager-ci" \
-      'arm64-v8a-release\\.apk$' \
+      'arm64-v8a-release\.apk$' \
       "SukiSU-Ultra-Manager.apk"
     ;;
   *)
