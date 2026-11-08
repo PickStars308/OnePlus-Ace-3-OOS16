@@ -1091,8 +1091,10 @@ runs:
         CHANNEL="${{ inputs.ksu_channel }}"
         INPUT_REF="${{ inputs.ksu_branch_or_hash }}"
         case "$CHANNEL" in
-          release) SUKISU_REF="${INPUT_REF:-v4.3.0-r2}" ;;
-          dev) SUKISU_REF="${INPUT_REF:-builtin}" ;;
+          release)
+            if [ -n "$INPUT_REF" ]; then SUKISU_REF="$INPUT_REF"; else SUKISU_REF="$(curl --fail --silent --show-error --location https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest | jq -er .tag_name)"; fi
+            ;;
+          dev) SUKISU_REF="${INPUT_REF:-dev}" ;;
           custom|"") SUKISU_REF="${INPUT_REF:-1cfa57340590971cba7521ed536da8ebbedc5f0a}" ;;
           *) echo "::error::Unknown SukiSU-Ultra channel: $CHANNEL"; exit 1 ;;
         esac
@@ -1109,7 +1111,7 @@ runs:
         KSU_VERSION=$((40000 + MAIN_COUNT - 2815))
         if [ "$KSU_VERSION" -le 0 ]; then echo "::error::Invalid SukiSU version: $KSU_VERSION"; exit 1; fi
         echo "KSUVER=$KSU_VERSION" >> "$GITHUB_ENV"
-        echo "KSU_BUILD_REF=builtin" >> "$GITHUB_ENV"
+        echo "KSU_BUILD_REF=$SUKISU_REF" >> "$GITHUB_ENV"
         DRIVERS_DIR="$COMMON_KERNEL_FOLDER/drivers"
         test -s "$DRIVERS_DIR/Makefile" && test -s "$DRIVERS_DIR/Kconfig"
         test -s "$SUKISU_FOLDER/kernel/Kbuild" && test -s "$SUKISU_FOLDER/kernel/Kconfig"
