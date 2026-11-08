@@ -12,7 +12,7 @@ inputs:
     options:
       - KSUN
       - KSU
-  ksu_channel:
+      - SUKISU  ksu_channel:
     description: 'release, dev, or custom'
     required: false
     default: custom
@@ -365,6 +365,7 @@ runs:
         SUSFS_DIR="$GITHUB_WORKSPACE/susfs4ksu"
         KSU_DIR="$KERNEL_PLATFORM_DIR/KernelSU"
         KSUN_DIR="$KERNEL_PLATFORM_DIR/KernelSU-Next"
+        SUKISU_DIR="$KERNEL_PLATFORM_DIR/SukiSU-Ultra"
         mkdir -p "$ARTIFACTS_DIR"
         mkdir -p "$DEBUG_ARTIFACTS_DIR"
         
@@ -380,6 +381,7 @@ runs:
         echo "SUSFS_FOLDER=$SUSFS_DIR" >> "$GITHUB_ENV"
         echo "KSU_FOLDER=$KSU_DIR" >> "$GITHUB_ENV"
         echo "KSUN_FOLDER=$KSUN_DIR" >> "$GITHUB_ENV"
+        echo "SUKISU_FOLDER=$SUKISU_DIR" >> "$GITHUB_ENV"
         
         DEBUG_ZIP_NAME="debug_${OP_MODEL}_${OP_OS_VERSION}.zip"
         echo "DEBUG_ZIP_NAME=$DEBUG_ZIP_NAME" >> "$GITHUB_ENV"
@@ -913,12 +915,25 @@ runs:
         git -C kernel_patches log -1 --oneline
         
         if [ "${{ env.OP_SUSFS }}" = true ]; then
-          echo "Using SUSFS branch/commit: $SUSFS_BRANCH"
-          if ! retry_fetch_archive "https://gitlab.com/simonpunk/susfs4ksu.git" "$SUSFS_BRANCH"; then
+          SUSFS_REF="$SUSFS_BRANCH"
+          if [ "${{ inputs.ksu_type }}" = "SUKISU" ]; then
+            case "${ANDROID_VER}-${KERNEL_VER}" in
+              android12-5.10) SUSFS_REF="b0e474642cf77ee797004a454fa441362723d0ba" ;;
+              android13-5.10) SUSFS_REF="8a120081f2739bc0e4b1f6a389d8236f22944acc" ;;
+              android13-5.15) SUSFS_REF="d5df1d937361530787fafa920dea3a9b6dc8ebef" ;;
+              android14-5.15) SUSFS_REF="e22ceec7cbc459dcf560cf4a0ac34a8235c8df84" ;;
+              android14-6.1) SUSFS_REF="a0ac906915c8a8d50d474dfb3cae478ef32edc1a" ;;
+              android15-6.6) SUSFS_REF="c7f670f57b7d43d75066b6657f8aee9cdf580d96" ;;
+              android16-6.12) SUSFS_REF="68f62fae75ada3959f816841a3c64299383521ed" ;;
+              *) echo "::error::No verified SukiSU SUSFS pin for ${ANDROID_VER}-${KERNEL_VER}"; exit 1 ;;
+            esac
+          fi
+          echo "Using SUSFS branch/commit: $SUSFS_REF"
+          if ! retry_fetch_archive "https://gitlab.com/simonpunk/susfs4ksu.git" "$SUSFS_REF"; then
             echo "::error::Failed to fetch SUSFS archive after multiple attempts"
             exit 1
           fi
-          echo "SUSFS_COMMIT_SHA=$SUSFS_BRANCH" >> $GITHUB_ENV
+          echo "SUSFS_COMMIT_SHA=$SUSFS_REF" >> $GITHUB_ENV
         fi
         echo "✅ Dependencies cloned"
         echo "::endgroup::"
@@ -1065,6 +1080,50 @@ runs:
 
         echo "::endgroup::"
 
+    - name: Add SukiSU-Ultra
+      shell: bash
+      if: ${{ inputs.ksu_type == 'SUKISU' }}
+      run: |
+        set -euo pipefail
+        echo "::group::Add SukiSU-Ultra"
+        cd "$KERNEL_PLATFORM_FOLDER"
+        CHANNEL="${{ inputs.ksu_channel }}"
+        INPUT_REF="${{ inputs.ksu_branch_or_hash }}"
+        case "$CHANNEL" in
+          release) SUKISU_REF="${INPUT_REF:-v4.3.0-r2}" ;;
+          dev) SUKISU_REF="${INPUT_REF:-builtin}" ;;
+          custom|"") SUKISU_REF="${INPUT_REF:-1cfa57340590971cba7521ed536da8ebbedc5f0a}" ;;
+          *) echo "::error::Unknown SukiSU-Ultra channel: $CHANNEL"; exit 1 ;;
+        esac
+        echo "Installing SukiSU-Ultra channel=$CHANNEL ref=$SUKISU_REF"
+        git clone --filter=blob:none --no-checkout https://github.com/SukiSU-Ultra/SukiSU-Ultra.git "$SUKISU_FOLDER"
+        git -C "$SUKISU_FOLDER" fetch --no-tags origin "$SUKISU_REF"
+        git -C "$SUKISU_FOLDER" checkout --detach FETCH_HEAD
+        git -C "$SUKISU_FOLDER" fetch origin main:refs/remotes/origin/main
+        ACTUAL_COMMIT="$(git -C "$SUKISU_FOLDER" rev-parse HEAD)"
+        echo "SUKISU_COMMIT_SHA=$ACTUAL_COMMIT" >> "$GITHUB_ENV"
+        echo "SUKISU_REF=$SUKISU_REF" >> "$GITHUB_ENV"
+        MAIN_COUNT="$(git -C "$SUKISU_FOLDER" rev-list --count refs/remotes/origin/main)"
+        KSU_VERSION=$((40000 + MAIN_COUNT - 2815))
+        if [ "$KSU_VERSION" -le 0 ]; then echo "::error::Invalid SukiSU version: $KSU_VERSION"; exit 1; fi
+        echo "KSUVER=$KSU_VERSION" >> "$GITHUB_ENV"
+        echo "KSU_BUILD_REF=builtin" >> "$GITHUB_ENV"
+        DRIVERS_DIR="$COMMON_KERNEL_FOLDER/drivers"
+        test -s "$DRIVERS_DIR/Makefile" && test -s "$DRIVERS_DIR/Kconfig"
+        test -s "$SUKISU_FOLDER/kernel/Kbuild" && test -s "$SUKISU_FOLDER/kernel/Kconfig"
+        if [ -e "$DRIVERS_DIR/kernelsu" ] || [ -L "$DRIVERS_DIR/kernelsu" ]; then echo "::error::drivers/kernelsu already exists"; exit 1; fi
+        ln -s "$SUKISU_FOLDER/kernel" "$DRIVERS_DIR/kernelsu"
+        grep -Fqx 'obj-$(CONFIG_KSU) += kernelsu/' "$DRIVERS_DIR/Makefile" || printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> "$DRIVERS_DIR/Makefile"
+        if ! grep -Fqx 'source "drivers/kernelsu/Kconfig"' "$DRIVERS_DIR/Kconfig"; then sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' "$DRIVERS_DIR/Kconfig"; fi
+        cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
+        CONFIG_KSU=y
+        CONFIG_KSU_MANUAL_SU=y
+        CONFIG_KPM=n
+        EOF
+        if [ "${{ env.OP_SUSFS }}" = "true" ]; then echo 'CONFIG_KSU_SUSFS=y' >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig"; else echo 'CONFIG_KSU_SUSFS=n' >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig"; fi
+        echo "SukiSU-Ultra" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "$KSU_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "::endgroup::"
     - name: Add KernelSU
       shell: bash
       if: ${{ inputs.ksu_type == 'KSU' }}
