@@ -18,6 +18,11 @@ on:
         required: false
         type: string
         default: ''
+      sukisu_susfs:
+        description: 'Enable SUSFS (builtin source supports inline SUSFS; release/dev need this disabled)'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -91,7 +96,8 @@ jobs:
             .opt == true
           ' "$CONFIG"
 
-          CONFIG_JSON="$(jq -c '.' "$CONFIG")"
+          SUSFS_ENABLED="${{ inputs.sukisu_susfs }}"
+          CONFIG_JSON="$(jq -c --argjson susfs "$SUSFS_ENABLED" '.susfs = $susfs' "$CONFIG")"
 
           echo "json=$CONFIG_JSON" >> "$GITHUB_OUTPUT"
 
