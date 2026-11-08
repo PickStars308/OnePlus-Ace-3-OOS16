@@ -1216,6 +1216,19 @@ runs:
           sed -i -E '/^[+ ]*#[[:space:]]*(ifdef|ifndef|endif).*CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER/ s/CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER/CONFIG_KSU_SUSFS/' "$PRIORITY_FILE"
         done
         echo "Normalized SUSFS priority UID filter guards to CONFIG_KSU_SUSFS"
+
+        SUSFS_HEADER="$COMMON_KERNEL_FOLDER/include/linux/susfs.h"
+        SUSFS_DEF_HEADER="$COMMON_KERNEL_FOLDER/include/linux/susfs_def.h"
+        SUSFS_SOURCE="$COMMON_KERNEL_FOLDER/fs/susfs.c"
+        for symbol in susfs_parse_priority_app_strings susfs_set_priority_uid_filter; do
+          grep -qE "^[[:space:]]*void[[:space:]]+$symbol[[:space:]]*\\(" "$SUSFS_HEADER" || { echo "::error::SUSFS header is missing declaration: $symbol"; exit 1; }
+          grep -qE "^void[[:space:]]+$symbol[[:space:]]*\\(" "$SUSFS_SOURCE" || { echo "::error::SUSFS source is missing implementation: $symbol"; exit 1; }
+        done
+        grep -qE "^#define[[:space:]]+CMD_SUSFS_SET_PRIORITY_UID_FILTER[[:space:]]+0x60030" "$SUSFS_DEF_HEADER" || { echo "::error::SUSFS v2.3.0 command ID is missing"; exit 1; }
+        if grep -nE "^[[:space:]]*#[[:space:]]*(ifdef|ifndef|endif).*CONFIG_KSU_SUSFS_PRIORITY_UID_FILTER" "$SUSFS_HEADER" "$SUSFS_SOURCE"; then
+          echo "::error::Found an unnormalized priority UID filter guard"; exit 1
+        fi
+        echo "Verified SUSFS priority UID filter declarations, implementations and command ID."
         
         susfs_version=$(grep '#define SUSFS_VERSION' "$COMMON_KERNEL_FOLDER/include/linux/susfs.h" | awk -F'"' '{print $2}')
         echo "SUSVER=$susfs_version" >> $GITHUB_ENV
