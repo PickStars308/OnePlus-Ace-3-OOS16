@@ -2264,7 +2264,7 @@ runs:
         
         make LD="$COMMON_KERNEL_FOLDER/ld-wrapper" HOSTLD="$COMMON_KERNEL_FOLDER/ld-wrapper" O="$OUT" olddefconfig
 
-        if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+        if [ "${{ inputs.ksu_type }}" = "KSUN" ] || [ "${{ inputs.ksu_type }}" = "SUKISU" ]; then
           if ! grep -qx 'CONFIG_KSU=y' "$OUT/.config"; then
             echo "::error::KernelSU is not enabled in the resolved .config; refusing to build a non-root Image."
             grep -E '^CONFIG_KSU=|^# CONFIG_KSU is not set|^CONFIG_KPROBES=|^CONFIG_EXT4_FS=' "$OUT/.config" || true
