@@ -8,7 +8,7 @@ on:
         description: 'SukiSU-Ultra source: Releases / Dev / Custom'
         required: true
         type: choice
-        default: dev
+        default: custom
         options:
           - release
           - dev
