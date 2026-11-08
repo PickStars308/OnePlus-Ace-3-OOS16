@@ -945,7 +945,11 @@ runs:
         SUKI_INPUT="${{ inputs.ksu_branch_or_hash }}"
         case "$SUKI_CHANNEL" in
           release)
-            SUKI_REF="${SUKI_INPUT:-v4.3.0-r2}"
+            if [ -n "$SUKI_INPUT" ]; then
+              SUKI_REF="$SUKI_INPUT"
+            else
+              SUKI_REF="$(curl --fail --silent --show-error --location https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/releases/latest | jq -er .tag_name)"
+            fi
             ;;
           dev)
             SUKI_REF="${SUKI_INPUT:-dev}"
@@ -2391,8 +2395,9 @@ runs:
           echo "Build User: ${{ env.BUILD_USER }}"
           echo "Build Host: ${{ env.BUILD_HOST }}"
           if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-            echo "KSUN Version: ${KSUVER:-unknown}"
-            echo "KSUN commit SHA: ${KSU_SHA:-unknown}"
+            echo "SukiSU-Ultra Version: ${KSUVER:-unknown}"
+            echo "SukiSU-Ultra channel/ref: ${KSUN_TAG:-unknown}"
+            echo "SukiSU-Ultra commit SHA: ${KSU_SHA:-unknown}"
           else
             echo "KSU Version: ${KSUVER:-unknown}"
             echo "KSU commit SHA: ${KSU_SHA:-unknown}"
@@ -2442,14 +2447,15 @@ runs:
           echo "| **Build User** | ${{ env.BUILD_USER }} |"
           echo "| **Build Host** | ${{ env.BUILD_HOST }} |"
           if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-            echo "| **KSUN Version** | ${KSUVER:-unknown} |"
+            echo "| **SukiSU-Ultra Version** | ${KSUVER:-unknown} |"
+            echo "| **SukiSU-Ultra Source** | ${KSUN_TAG:-unknown} |"
           else
             echo "| **KSU Version** | ${KSUVER:-unknown} |"
           fi
           
           if [ "$KSU_SHA" != "unknown" ]; then
             if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
-              echo "| **KSUN Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/$KSU_SHA) |"
+              echo "| **SukiSU-Ultra Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/$KSU_SHA) |"
             else
               echo "| **KSU Commit** | [\`${KSU_SHA:0:8}\`](https://github.com/tiann/KernelSU/commit/$KSU_SHA) |"
             fi
