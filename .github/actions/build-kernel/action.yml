@@ -12,7 +12,8 @@ inputs:
     options:
       - KSUN
       - KSU
-      - SUKISU  ksu_channel:
+      - SUKISU
+  ksu_channel:
     description: 'release, dev, or custom'
     required: false
     default: custom
@@ -1286,7 +1287,26 @@ runs:
             fi
             ;;
           "v2.3.0")
-            if [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
+            if [ "${{ inputs.ksu_type }}" = "SUKISU" ]; then
+              cd "$SUKISU_FOLDER"
+              # The builtin SukiSU source calls these SUSFS APIs but does not
+              # include the public SUSFS header in these two translation units.
+              for source_file in kernel/manager/pkg_observer.c kernel/supercall/dispatch.c; do
+                test -s "$source_file"
+                grep -Fq "#include <linux/susfs.h>" "$source_file" || sed -i '1i#include <linux/susfs.h>' "$source_file"
+              done
+              for symbol in susfs_parse_priority_app_strings susfs_set_priority_uid_filter; do
+                if ! grep -Rqs "$symbol" "$COMMON_KERNEL_FOLDER/include/linux" "$COMMON_KERNEL_FOLDER/fs"; then
+                  echo "::error::Selected SUSFS source is missing required API: $symbol"
+                  exit 1
+                fi
+              done
+              if ! grep -Rqs "CMD_SUSFS_SET_PRIORITY_UID_FILTER" "$COMMON_KERNEL_FOLDER/include/linux"; then
+                echo "::error::SUSFS headers lack CMD_SUSFS_SET_PRIORITY_UID_FILTER"
+                exit 1
+              fi
+              echo "SukiSU SUSFS v2.3.0 APIs verified; no KSUN patch stack applied."
+            elif [ "${{ inputs.ksu_type }}" = "KSUN" ]; then
               cd "$KSUN_FOLDER"
 
               # UAPI 6 upstream introduced an independent SUSFS guard LKM.
