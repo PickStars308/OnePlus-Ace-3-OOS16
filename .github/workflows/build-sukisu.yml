@@ -395,7 +395,8 @@ jobs:
             .rust_build == false
           ' "$CONFIG" >/dev/null
 
-          CONFIG_JSON="$(jq -c '.' "$CONFIG")"
+          SUSFS_ENABLED="${{ inputs.sukisu_susfs }}"
+          CONFIG_JSON="$(jq -c --argjson susfs "$SUSFS_ENABLED" '.susfs = $susfs' "$CONFIG")"
           echo "json=$CONFIG_JSON" >> "$GITHUB_OUTPUT"
 
           echo "Configuration validation passed."
