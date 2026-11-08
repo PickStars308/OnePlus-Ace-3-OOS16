@@ -12,6 +12,7 @@ on:
         options:
           - KSUN
           - KSU
+          - SUKISU
       ksu_channel:
         description: "Source channel (release tag / dev branch / custom ref)"
         required: true
@@ -22,7 +23,7 @@ on:
           - dev
           - custom
       ksu_ref:
-        description: "Release tag or commit/branch (custom defaults to KSUN 33355)"
+        description: "SukiSU: release tag / dev branch / custom ref; KSUN/KSU: corresponding ref"
         required: false
         type: string
         default: ""
