@@ -4,6 +4,20 @@ name: Build OnePlus Ace 3 - SukiSU Ultra + SUSFS
 on:
   workflow_dispatch:
     inputs:
+      sukisu_channel:
+        description: 'SukiSU-Ultra source: Releases / Dev / Custom'
+        required: true
+        type: choice
+        default: dev
+        options:
+          - release
+          - dev
+          - custom
+      sukisu_ref:
+        description: 'Release tag, dev branch, or custom branch/commit. Empty uses the channel default.'
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -638,10 +652,13 @@ jobs:
         with:
           op_config_json: ${{ steps.config.outputs.json }}
 
-          # KernelSU variant, channel and ref selected in Run workflow
+          # SukiSU-Ultra source selection from workflow_dispatch
+          # release -> v4.3.0-r2 (unless sukisu_ref overrides it)
+          # dev     -> builtin (unless sukisu_ref overrides it)
+          # custom  -> user-supplied branch/tag/commit (empty uses pinned builtin)
           ksu_type: KSUN
-          ksu_channel: custom
-          ksu_branch_or_hash: main
+          ksu_channel: ${{ inputs.sukisu_channel }}
+          ksu_branch_or_hash: ${{ inputs.sukisu_ref }}
           
           susfs_commit_hash_or_branch: "2ad2973" # Archived SUSFS v2.3.0 enable patch matched to kernel_patches high/ fixes
 
