@@ -933,63 +933,79 @@ runs:
         sed -i 's/protected_modules = \[.*\]/protected_modules = []/' common/modules.bzl || true
         echo "::endgroup::"
 
-    - name: Add KernelSU Next (SUSFS v2.3.0 / KernelSU-Next 33355)
+    - name: Add SukiSU-Ultra (selected source channel)
       shell: bash
       if: ${{ inputs.ksu_type == 'KSUN' }}
       run: |
         set -euo pipefail
-        echo "::group::Add KernelSU Next (SUSFS v2.3.0 / KernelSU-Next 33355)"
-
+        echo "::group::Add SukiSU-Ultra"
         cd "$KERNEL_PLATFORM_FOLDER"
 
-        # SukiSU Ultra builtin carries SUSFS Kconfig and manual-hook support.
-        # The main branch is a different runtime-hook architecture.
-        SUKI_REF="builtin"
-        echo "Installing SukiSU Ultra builtin branch"
-        curl --fail --location --retry 3 --proto '=https' -LSs \
-          "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" \
-          | bash -s "$SUKI_REF"
+        SUKI_CHANNEL="${{ inputs.ksu_channel }}"
+        SUKI_INPUT="${{ inputs.ksu_branch_or_hash }}"
+        case "$SUKI_CHANNEL" in
+          release)
+            SUKI_REF="${SUKI_INPUT:-v4.3.0-r2}"
+            ;;
+          dev)
+            SUKI_REF="${SUKI_INPUT:-dev}"
+            ;;
+          custom|"")
+            SUKI_REF="${SUKI_INPUT:-1cfa57340590971cba7521ed536da8ebbedc5f0a}"
+            ;;
+          *)
+            echo "::error::Invalid SukiSU-Ultra channel: $SUKI_CHANNEL"
+            exit 1
+            ;;
+        esac
+
+        echo "Selected SukiSU-Ultra channel=$SUKI_CHANNEL ref=$SUKI_REF"
+        SUKI_SETUP="https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh"
+        curl --fail --location --retry 3 --proto '=https' -LSs "$SUKI_SETUP" | bash -s builtin
+
         KSUN_DIR="$KERNEL_PLATFORM_FOLDER/KernelSU"
         test -d "$KSUN_DIR/.git"
+        git -C "$KSUN_DIR" fetch --no-tags origin "$SUKI_REF"
+        git -C "$KSUN_DIR" checkout --detach FETCH_HEAD
+        git -C "$KSUN_DIR" fetch origin main:refs/remotes/origin/main
+        git -C "$KSUN_DIR" submodule update --init --recursive
+
         ACTUAL_COMMIT="$(git -C "$KSUN_DIR" rev-parse HEAD)"
         echo "KSUN_TAG=$SUKI_REF" >> "$GITHUB_ENV"
         echo "KSUN_COMMIT_SHA=$ACTUAL_COMMIT" >> "$GITHUB_ENV"
-        echo "SukiSU Ultra commit: $ACTUAL_COMMIT"
-        git -C "$KSUN_DIR" submodule update --init --recursive
+        echo "SukiSU-Ultra commit: $ACTUAL_COMMIT"
 
-        echo "SukiSU Ultra commit: $ACTUAL_COMMIT"
-        cd "$KSUN_DIR/kernel"
-
-        # SukiSU Ultra defines its own version scheme in kernel/Kbuild.
-        # Do not rewrite it using KernelSU-Next's version formula.
-        KSU_VERSION="$(git -C "$KSUN_DIR" describe --tags --always)"
-        echo "SukiSU Ultra source version: $KSU_VERSION"
-        if [ -f ksu.c ]; then
-          sed -i 's/#if defined(CONFIG_STACKPROTECTOR) && (defined(CONFIG_ARM64) && !defined(CONFIG_STACKPROTECTOR_PER_TASK))/#if 0/' ksu.c
+        # SukiSU's kernel/Kbuild computes the numeric version as
+        # 40000 + commits(main) - 2815. Keep this numeric value for
+        # the hook-version checks and the manager/kernel metadata.
+        MAIN_COUNT="$(git -C "$KSUN_DIR" rev-list --count refs/remotes/origin/main)"
+        KSU_VERSION=$((40000 + MAIN_COUNT - 2815))
+        if [ "$KSU_VERSION" -le 0 ]; then
+          echo "::error::Invalid SukiSU-Ultra version code: $KSU_VERSION"
+          exit 1
         fi
+        echo "SukiSU-Ultra version code: $KSU_VERSION"
+        echo "NEED_HOOKS=false" >> "$GITHUB_ENV"
 
-        if [ "$KSU_VERSION" -lt 12884 ]; then
-          echo "NEED_HOOKS=true" >> "$GITHUB_ENV"
-        else
-          echo "NEED_HOOKS=false" >> "$GITHUB_ENV"
+        # SUSFS v2.3.0 inline integration is provided by the builtin
+        # source branch. Do not silently claim SUSFS support for release/dev
+        # source trees that do not declare CONFIG_KSU_SUSFS.
+        if [ "$OP_SUSFS" = "true" ] && ! grep -q 'config KSU_SUSFS' "$KSUN_DIR/kernel/Kconfig"; then
+          echo "::error::Selected SukiSU ref '$SUKI_REF' does not provide CONFIG_KSU_SUSFS."
+          echo "::error::For this Ace 3 SUSFS build, choose Custom and enter builtin (or the verified builtin commit)."
+          exit 1
         fi
-
-        cd ..
-
-        echo "Add KSUN Configuration Settings"
 
         cat >> "$COMMON_KERNEL_FOLDER/arch/arm64/configs/gki_defconfig" <<EOF
         CONFIG_KSU=y
         CONFIG_KSU_KPROBES_HOOK=n
         EOF
 
-        echo "KSUN" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
+        echo "SukiSU-Ultra ($SUKI_CHANNEL: $SUKI_REF)" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
         echo "$KSU_VERSION" >> "${ARTIFACTS_FOLDER}/${OP_MODEL}_${OP_OS_VERSION}.txt"
-
         echo "KSUVER=$KSU_VERSION" >> "$GITHUB_ENV"
-
+        echo "KSU_BUILD_REF=$SUKI_REF" >> "$GITHUB_ENV"
         echo "::endgroup::"
-
     - name: Add KernelSU
       shell: bash
       if: ${{ inputs.ksu_type == 'KSU' }}
